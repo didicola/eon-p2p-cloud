@@ -24,6 +24,18 @@
       { "name": "GLOBAL_SWARM", "class_name": "GlobalSwarmDO" }
     ]
   },
+  "r2_buckets": [
+    {
+      "binding": "LOG_BUCKET",
+      "bucket_name": "eon-p2p-cloud-logs",
+      "preview_bucket_name": "eon-p2p-cloud-logs-preview"
+    },
+    {
+      "binding": "CACHE_BUCKET",
+      "bucket_name": "eon-p2p-cloud-cache",
+      "preview_bucket_name": "eon-p2p-cloud-cache-preview"
+    }
+  ],
   "kv_namespaces": [
     {
       "binding": "RATE_LIMIT_KV",
