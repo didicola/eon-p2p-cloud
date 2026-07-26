@@ -1,0 +1,5 @@
+account-creator.sh
+deploy_multi_account.sh
+register_provider.sh
+*.bak-arch
+*.bak
