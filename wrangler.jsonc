@@ -21,25 +21,18 @@
       { "name": "INCENTIVES", "class_name": "IncentiveDO" },
       { "name": "EDGE_SWARM", "class_name": "EdgeSwarmDO" },
       { "name": "REGIONAL_SWARM", "class_name": "RegionalSwarmDO" },
-      { "name": "GLOBAL_SWARM", "class_name": "GlobalSwarmDO" }
+      { "name": "GLOBAL_SWARM", "class_name": "GlobalSwarmDO" },
+      { "name": "ACCOUNT_MANAGER", "class_name": "AccountManagerDO" }
     ]
   },
-  "r2_buckets": [
-    {
-      "binding": "LOG_BUCKET",
-      "bucket_name": "eon-p2p-cloud-logs",
-      "preview_bucket_name": "eon-p2p-cloud-logs-preview"
-    },
-    {
-      "binding": "CACHE_BUCKET",
-      "bucket_name": "eon-p2p-cloud-cache",
-      "preview_bucket_name": "eon-p2p-cloud-cache-preview"
-    }
-  ],
   "kv_namespaces": [
     {
       "binding": "RATE_LIMIT_KV",
       "id": "0860a1261eff4a30b9629d7c9af4d426"
+    },
+    {
+      "binding": "CACHE_KV",
+      "id": "c7e491e9a5534ce0b791cda0779281c4"
     }
   ],
   "queues": {
@@ -54,6 +47,7 @@
     { "tag": "v1", "new_sqlite_classes": ["P2PSwarmDO"] },
     { "tag": "v2", "new_sqlite_classes": ["CloudP2PAgentDO"] },
     { "tag": "v3", "new_sqlite_classes": ["CloudOpencodeDO"] },
-    { "tag": "v4", "new_sqlite_classes": ["ReputationDO", "ModelRegistryDO", "IncentiveDO", "EdgeSwarmDO", "RegionalSwarmDO", "GlobalSwarmDO"] }
+    { "tag": "v4", "new_sqlite_classes": ["ReputationDO", "ModelRegistryDO", "IncentiveDO", "EdgeSwarmDO", "RegionalSwarmDO", "GlobalSwarmDO"] },
+    { "tag": "v5", "new_sqlite_classes": ["AccountManagerDO"] }
   ]
 }

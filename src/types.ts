@@ -99,6 +99,29 @@ export interface VerificationRequest {
   model: string;
 }
 
+export type ProviderType = "cloudflare" | "github" | "huggingface" | "openrouter" | "mistral" | "groq" | "cerebras" | "sambanova" | "gemini" | "anthropic" | "keylessai" | "pollinations" | "bazaarlink" | "nvidia" | "elevenlabs" | "replicate" | "together" | "deepinfra" | "fireworks" | "novita";
+
+export interface ProviderUsage {
+  requestsUsed: number;
+  requestsLimit: number;
+  tokensUsed: number;
+  tokensLimit: number;
+  lastReset: number;
+}
+
+export interface AccountRecord {
+  alias: string;
+  provider: ProviderType;
+  apiKey: string;
+  email: string;
+  baseUrl?: string;
+  status: "active" | "rate_limited" | "error";
+  usage: ProviderUsage;
+  lastCheck: number;
+  extra?: Record<string, string>;
+  note?: string;
+}
+
 export interface VerificationResponse {
   taskId: string;
   score: number;
@@ -118,6 +141,7 @@ export interface Env {
   EDGE_SWARM: DurableObjectNamespace;
   REGIONAL_SWARM: DurableObjectNamespace;
   GLOBAL_SWARM: DurableObjectNamespace;
+  ACCOUNT_MANAGER: DurableObjectNamespace;
   TASK_QUEUE: Queue<QueueTask>;
   LOG_BUCKET?: R2Bucket;
   CACHE_KV?: KVNamespace;

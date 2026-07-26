@@ -1,13 +1,14 @@
 # EON P2P Cloud — Complete Architecture Bible
 
-> Version 3.0 — Deployed on Cloudflare Workers Edge (330+ cities)
+> Version 3.5 — Deployed on Cloudflare Workers Edge (330+ cities)
 > 17 source files, 5,302 lines TypeScript, 9 Durable Objects
+> Companion at http://127.0.0.1:8089 — 13 system matrices
 
 ---
 
 ## 1. SYSTEM OVERVIEW
 
-eon-p2p-cloud is the world's first **edge-native, multi-provider, P2P AI inference marketplace**. It routes LLM requests through a 4-tier fallback chain, all at $0 cost, with stateful coordination across Cloudflare's global network.
+eon-p2p-cloud is the world's first **edge-native, multi-provider, P2P AI inference marketplace**. It routes LLM requests through a 9-tier fallback chain (Workers AI → Cache → Blind Proxy → P2P Swarm, with 5 model-provider sub-tiers inside the proxy), all at $0 cost, with stateful coordination across Cloudflare's global network. A companion process at :8089 serves 13 system matrices for memory, truth, thought, search, and more.
 
 ### What It Solves
 
@@ -147,7 +148,7 @@ eon-p2p-cloud/
 
 ---
 
-## 4. REQUEST FLOW (4-TIER FALLBACK)
+## 4. REQUEST FLOW (9-TIER FALLBACK WITH COMPANION)
 
 ```
 User → POST /v1/chat/completions { model, messages }
@@ -368,7 +369,8 @@ Reputation is used by `P2PSwarmDO.findBestPeer()` to prefer reliable peers.
     ]
   },
   "kv_namespaces": [
-    { "binding": "RATE_LIMIT_KV", "id": "0860a1261eff4a30b9629d7c9af4d426" }
+    { "binding": "RATE_LIMIT_KV", "id": "0860a1261eff4a30b9629d7c9af4d426" },
+    { "binding": "CACHE_KV", "id": "c7e491e9a5534ce0b791cda0779281c4" }
   ],
   "queues": {
     "producers": [{ "binding": "TASK_QUEUE", "queue": "eon-task-queue" }],
@@ -507,10 +509,11 @@ POST /admin/verify { prompt, model, count }
 ## 11. DEPLOYMENT
 
 ### Current Deploy
-- **Version:** 71bde5fb-9a6b-48d3-a9aa-b61fc5295fb0
+- **Version:** 3510ee98-601a-4dc4-90bb-5f3b2f638243
 - **Upload:** 116.61 KiB (gzip: 23.39 KiB)
-- **Startup:** 7ms
+- **Startup:** 5ms
 - **URL:** https://eon-p2p-cloud.exportdefaultasyncfetchrequestenvconsturl.workers.dev
+- **Bindings:** 9 DOs, 2 KV (RATE_LIMIT_KV, CACHE_KV), 1 Queue, AI
 
 ### How to Re-Deploy
 ```bash
@@ -553,4 +556,35 @@ npx wrangler secret put LOCAL_P2P_URL
 
 ---
 
-*Generated: 2026-07-26 | EON P2P Cloud v3.0*
+## 13. COMPANION SYSTEM MATRIX (v3.5)
+
+The EON P2P Cloud companion runs at **http://127.0.0.1:8089** and provides 13 system matrices for introspection and state management:
+
+| # | Matrix | Endpoint | Purpose |
+|---|--------|----------|---------|
+| 1 | Memory | `/matrix/memory` | ChromaDB vector memory store |
+| 2 | Truth | `/matrix/truth` | Ground truth assertions |
+| 3 | Thought | `/matrix/thought` | Thought sequence archives |
+| 4 | Search | `/matrix/search` | Web search results cache |
+| 5 | Research | `/matrix/research` | Deep research reports |
+| 6 | Web | `/matrix/web` | Web fetch cache |
+| 7 | Storage | `/matrix/storage` | File storage index |
+| 8 | MCP | `/matrix/mcp` | MCP server registry |
+| 9 | Files | `/matrix/files` | File system operations log |
+| 10 | Code | `/matrix/code` | Code execution results |
+| 11 | Config | `/matrix/config` | System configuration snapshot |
+| 12 | Project | `/matrix/project` | Project definitions |
+| 13 | Data | `/matrix/data` | Structured data store |
+
+**API Endpoints:**
+| Endpoint | Description |
+|----------|-------------|
+| `GET /system` | Full endpoint listing for all 13 matrices |
+| `GET /health` | Health check (companion status, uptime) |
+| `GET /v1/models` | Model list from the companion's perspective |
+
+The companion integrates with the blind proxy at :8090 (523 models, 9-tier fallback) and OmniRoute at :20128 (99 models) to provide a unified system view.
+
+---
+
+*Generated: 2026-07-26 | EON P2P Cloud v3.5*

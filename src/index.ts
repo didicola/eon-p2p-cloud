@@ -17,6 +17,7 @@ export { IncentiveDO } from "./do/incentives";
 export { EdgeSwarmDO } from "./do/edge-swarm";
 export { RegionalSwarmDO } from "./do/regional-swarm";
 export { GlobalSwarmDO } from "./do/global-swarm";
+export { AccountManagerDO } from "./do/account-manager";
 
 // -----------------------------------------------------------------------------
 // Module imports
@@ -1118,6 +1119,90 @@ export default {
       }
 
       // ─────────────────────────────────────────────────────────────
+      // POST /accounts/register — register a provider account
+      //   Body: { alias, provider, apiKey, email, baseUrl?, note? }
+      // ─────────────────────────────────────────────────────────────
+      if (url.pathname === "/accounts/register" && method === "POST") {
+        const body = (await request.json()) as {
+          alias: string; provider: string; apiKey: string; email: string; baseUrl?: string; note?: string; extra?: Record<string, string>;
+        };
+        const doId = env.ACCOUNT_MANAGER.idFromName("accounts");
+        const stub = env.ACCOUNT_MANAGER.get(doId);
+        await stub.register({
+          alias: body.alias,
+          provider: body.provider as any,
+          apiKey: body.apiKey,
+          email: body.email,
+          baseUrl: body.baseUrl,
+          status: "active",
+          usage: { requestsUsed: 0, requestsLimit: 10000, tokensUsed: 0, tokensLimit: 1000000, lastReset: Date.now() },
+          lastCheck: Date.now(),
+          extra: body.extra,
+          note: body.note,
+        });
+        return new Response(JSON.stringify({ ok: true, provider: body.provider, alias: body.alias }), {
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        });
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // GET /accounts/list?provider=X — list accounts (optionally filtered)
+      // ─────────────────────────────────────────────────────────────
+      if (url.pathname === "/accounts/list" && method === "GET") {
+        const provider = url.searchParams.get("provider") || undefined;
+        const doId = env.ACCOUNT_MANAGER.idFromName("accounts");
+        const stub = env.ACCOUNT_MANAGER.get(doId);
+        const accounts = await stub.list(provider);
+        const safe = accounts.map((a: any) => ({
+          alias: a.alias, provider: a.provider, status: a.status,
+          usage: a.usage, email: a.email, baseUrl: a.baseUrl,
+          lastCheck: a.lastCheck, note: a.note,
+        }));
+        return new Response(JSON.stringify({ count: safe.length, accounts: safe }), {
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        });
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // GET /accounts/rotate?provider=X&exclude=A — least-loaded account
+      // ─────────────────────────────────────────────────────────────
+      if (url.pathname === "/accounts/rotate" && method === "GET") {
+        const provider = url.searchParams.get("provider");
+        const exclude = url.searchParams.get("exclude") || undefined;
+        if (!provider) return jsonError(400, "missing_provider", "provider query param required");
+        const doId = env.ACCOUNT_MANAGER.idFromName("accounts");
+        const stub = env.ACCOUNT_MANAGER.get(doId);
+        const account = await stub.rotate(provider, exclude);
+        if (!account) {
+          return jsonError(404, "no_active_accounts", `No active ${provider} accounts`);
+        }
+        return new Response(JSON.stringify({
+          alias: account.alias, provider: account.provider,
+          baseUrl: account.baseUrl,
+          usage: `${account.usage.requestsUsed}/${account.usage.requestsLimit}`,
+        }), {
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        });
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // DELETE /accounts/remove?provider=X&alias=A — remove an account
+      // ─────────────────────────────────────────────────────────────
+      if (url.pathname === "/accounts/remove" && method === "DELETE") {
+        const provider = url.searchParams.get("provider");
+        const alias = url.searchParams.get("alias");
+        if (!provider || !alias) {
+          return jsonError(400, "missing_params", "provider and alias query params required");
+        }
+        const doId = env.ACCOUNT_MANAGER.idFromName("accounts");
+        const stub = env.ACCOUNT_MANAGER.get(doId);
+        await stub.remove(provider, alias);
+        return new Response(JSON.stringify({ ok: true, provider, removed: alias }), {
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        });
+      }
+
+      // ─────────────────────────────────────────────────────────────
       // Fallback — informational message
       // ─────────────────────────────────────────────────────────────
       return new Response(
@@ -1145,6 +1230,10 @@ export default {
             admin_verify: "POST /admin/verify",
             region_metrics: "GET /region/:region/metrics",
             admin_migrate: "POST /admin/migrate",
+            accounts_register: "POST /accounts/register  {alias,provider,apiKey,email}",
+            accounts_list: "GET /accounts/list?provider=X",
+            accounts_rotate: "GET /accounts/rotate?provider=X",
+            accounts_remove: "DELETE /accounts/remove?provider=X&alias=A",
           },
         }),
         {
