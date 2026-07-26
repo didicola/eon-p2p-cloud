@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "eon-p2p-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1.0
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "P2P_SWARM", "class_name": "P2PSwarmDO" },
+      { "name": "REPUTATION", "class_name": "ReputationDO" },
+      { "name": "CLOUD_AGENT", "class_name": "CloudP2PAgentDO" },
+      { "name": "OPENCODE", "class_name": "CloudOpencodeDO" },
+      { "name": "MODEL_REGISTRY", "class_name": "ModelRegistryDO" },
+      { "name": "INCENTIVES", "class_name": "IncentiveDO" },
+      { "name": "EDGE_SWARM", "class_name": "EdgeSwarmDO" },
+      { "name": "REGIONAL_SWARM", "class_name": "RegionalSwarmDO" },
+      { "name": "GLOBAL_SWARM", "class_name": "GlobalSwarmDO" }
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT_KV",
+      "id": "0860a1261eff4a30b9629d7c9af4d426"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "TASK_QUEUE", "queue": "eon-task-queue" }
+    ],
+    "consumers": [
+      { "queue": "eon-task-queue", "max_batch_size": 5, "max_batch_timeout": 5 }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["P2PSwarmDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["CloudP2PAgentDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["CloudOpencodeDO"] },
+    { "tag": "v4", "new_sqlite_classes": ["ReputationDO", "ModelRegistryDO", "IncentiveDO", "EdgeSwarmDO", "RegionalSwarmDO", "GlobalSwarmDO"] }
+  ]
+}
