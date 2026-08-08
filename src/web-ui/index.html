@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a1a">
+<meta name="description" content="EON AI CPW — The world's most powerful autonomous AI infrastructure">
+<title>EON AI CPW</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='none' stroke='%2300f0ff' stroke-width='2'/><text x='16' y='22' text-anchor='middle' fill='%2300f0ff' font-size='18' font-family='monospace'>E</text></svg>">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <nav id="nav">
+    <div class="nav-brand">
+      <span class="logo">⬡</span>
+      <span class="brand-text">EON</span>
+      <span class="brand-sub">AI CPW</span>
+    </div>
+    <div class="nav-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">connecting</span>
+    </div>
+    <div class="nav-tools">
+      <button class="tool-btn" id="voiceBtn" title="Voice input">🎤</button>
+      <button class="tool-btn" id="imageBtn" title="Upload image">🖼</button>
+      <button class="tool-btn" id="genBtn" title="Generate image">✨</button>
+      <button class="tool-btn" id="webAgentBtn" title="Web agent browse">🌐</button>
+      <button class="tool-btn" id="memoryBtn" title="Dream memory">💭</button>
+      <button class="tool-btn" id="systemBtn" title="System panel">⚙</button>
+    </div>
+  </nav>
+
+  <div id="layout">
+    <main id="main">
+      <div id="messages"></div>
+      <div id="input-area">
+        <div class="agent-bar" id="agentBar">
+          <button class="agent-chip active" data-agent="auto">Auto</button>
+          <button class="agent-chip" data-agent="researcher">Researcher</button>
+          <button class="agent-chip" data-agent="code_executor">Code</button>
+          <button class="agent-chip" data-agent="planner">Planner</button>
+          <button class="agent-chip" data-agent="critic">Critic</button>
+          <button class="agent-chip" data-agent="frontend">UI</button>
+          <button class="agent-chip" data-agent="reasoning">Reason</button>
+          <button class="agent-chip" data-agent="summarizer">Summary</button>
+        </div>
+        <div class="input-row">
+          <textarea id="input" rows="1" placeholder="Ask anything..." enterkeyhint="send"></textarea>
+          <button id="sendBtn" class="send-btn">➤</button>
+        </div>
+      </div>
+    </main>
+
+    <aside id="panel" class="hidden">
+      <div class="panel-header">
+        <span id="panelTitle">System</span>
+        <button class="panel-close" id="panelClose">✕</button>
+      </div>
+      <div class="panel-content" id="panelContent"></div>
+    </aside>
+  </div>
+
+  <div id="toast"></div>
+  <input type="file" id="imageInput" accept="image/*" hidden>
+  <div id="webAgentModal" class="modal hidden">
+    <div class="modal-bg"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <span>Web Agent</span>
+        <button class="modal-close" id="webAgentClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Autonomously browse, extract, and analyze any public URL.</p>
+        <input type="url" id="webAgentUrl" class="modal-input" placeholder="https://..." autofocus>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="modal-btn primary" id="webAgentBrowse">Browse</button>
+          <button class="modal-btn" id="webAgentSearch">Search</button>
+          <button class="modal-btn" id="webAgentLLM">Analyze with AI</button>
+        </div>
+        <div id="webAgentResult" class="modal-result hidden"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

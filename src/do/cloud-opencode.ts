@@ -30,8 +30,9 @@ export class CloudOpencodeDO extends DurableObject<Env> {
    * @param prompt  User query
    * @returns The model's text response, or null if all models failed.
    */
-  async callWorkersAI(system: string, prompt: string): Promise<string | null> {
+  async callWorkersAI(system: string, prompt: string, preferred?: string): Promise<string | null> {
     const modelsToTry = [
+      ...(preferred ? [preferred] : []),
       "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
       "@cf/meta/llama-4-scout-17b-16e-instruct",
       "@cf/qwen/qwen2.5-coder-32b-instruct",
@@ -125,8 +126,9 @@ export class CloudOpencodeDO extends DurableObject<Env> {
     }
 
     const result =
-      (await this.callWorkersAI(route.system, prompt)) ??
-      (await this.callFreeLLM(route.system, prompt));
+      (await this.callWorkersAI(route.system, prompt, route.backup)) ??
+      (await this.callFreeLLM(route.system, prompt)) ??
+      (await this.callWorkersAI(route.system, prompt));
 
     return result ?? `Cloud agent "${agentType}": all providers exhausted`;
   }
