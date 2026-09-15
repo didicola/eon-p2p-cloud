@@ -1,0 +1,12 @@
+name: eon-distro-probe
+on: {workflow_dispatch: {}}
+jobs:
+  probe:
+    strategy:
+      matrix:
+        image: [debian:stable-slim, fedora:latest, archlinux:latest, alpine:latest]
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 5
+    steps:
+      - run: cat /etc/os-release | head -3; uname -m
