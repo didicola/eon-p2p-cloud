@@ -1,0 +1,42 @@
+name: eon-cloud-runner
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'task_id to run (empty = claim oldest cloud-runner task)'
+        required: false
+        default: ''
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Claim and run one cloud task
+        env:
+          EDGE: ${{ secrets.EDGE_BEARER }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, urllib.request, os
+          B = "https://eon-p2p-cloud.eon-sovereign.workers.dev"
+          H = {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["EDGE"], "User-Agent": "eon-cloud-runner/1.0"}
+          def call(path, body=None):
+              r = urllib.request.Request(B + path, data=(json.dumps(body).encode() if body is not None else None), headers=H, method="POST" if body is not None else "GET")
+              return json.load(urllib.request.urlopen(r, timeout=60))
+          want = "${{ inputs.task }}"
+          tasks = call("/delegate/pending").get("tasks", [])
+          mine = [t for t in tasks if t.get("target") == "cloud-runner"]
+          t = next((x for x in mine if (x.get("task_id") or x.get("id")) == want), None) if want else (mine[0] if mine else None)
+          if not t:
+              print("no cloud-runner tasks, queue depth:", len(tasks))
+              raise SystemExit(0)
+          tid = t.get("task_id") or t.get("id")
+          kind = str(t.get("action", "")).split(" ")[0]
+          out = {"note": "no-handler"}
+          if kind == "shell-probe":
+              import platform
+              out = {"uname": platform.uname()._asdict(), "ok": True}
+          call("/delegate/result", {"task_id": tid, "status": "done", "output": json.dumps(out)[:1500]})
+          print("completed", tid)
+          PYEOF
