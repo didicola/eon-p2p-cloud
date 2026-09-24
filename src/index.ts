@@ -201,9 +201,12 @@ async function handleStreamingChat(
   }
 
   try {
+    // DOOR-PATCH (proven 2026-09-15): streams break when max_tokens > ~8192.
+    // Clamp to 8192 whenever streaming is requested.
+    const maxTokens = body.max_tokens ? Math.min(body.max_tokens, 8192) : 800;
     const stream = (await env.AI.run(cfModel, {
       messages: body.messages,
-      max_tokens: body.max_tokens || 800,
+      max_tokens: maxTokens,
       stream: true,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any)) as ReadableStream;
@@ -232,17 +235,49 @@ async function handleStreamingChat(
       async start(controller) {
         const reader = tee[0].getReader();
         const decoder = new TextDecoder();
+        let sentDone = false;
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) {
-              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+              if (!sentDone) {
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                sentDone = true;
+              }
               break;
             }
             const text = decoder.decode(value, { stream: true });
             const lines = text.split("\n").filter((l) => l.trim());
             for (const line of lines) {
-              controller.enqueue(encoder.encode(`data: ${line}\n\n`));
+              let content = line.trim();
+              // DOOR-PATCH (proven 2026-09-15): strip any existing "data: "
+              // prefix so we never emit "data: data: {...}" double-prefix.
+              if (content.startsWith("data:")) content = content.slice(5).trim();
+              if (!content) continue;
+              // DOOR-PATCH: honor an upstream [DONE] once; never duplicate.
+              if (content === "[DONE]") {
+                if (!sentDone) {
+                  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                  sentDone = true;
+                }
+                continue;
+              }
+              // DOOR-PATCH (proven 2026-09-15): drop usage-only stats chunks
+              // (no choices, no error) that break SDK type validation.
+              try {
+                const parsed = JSON.parse(content);
+                if (
+                  parsed &&
+                  typeof parsed === "object" &&
+                  !parsed.choices &&
+                  !parsed.error
+                ) {
+                  continue;
+                }
+              } catch {
+                // not JSON; pass through
+              }
+              controller.enqueue(encoder.encode(`data: ${content}\n\n`));
             }
           }
         } catch (e) {
