@@ -144,6 +144,7 @@ export interface Env {
   ACCOUNT_MANAGER: DurableObjectNamespace;
   DREAM_MEMORY: DurableObjectNamespace;
   DREAM_ENGINE: DurableObjectNamespace;
+  TUNNEL_RELAY: DurableObjectNamespace;
   TASK_QUEUE: Queue<QueueTask>;
   LOG_BUCKET?: R2Bucket;
   CACHE_KV?: KVNamespace;

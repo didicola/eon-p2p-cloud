@@ -20,6 +20,7 @@ export { GlobalSwarmDO } from "./do/global-swarm";
 export { AccountManagerDO } from "./do/account-manager";
 export { DreamMemoryDO } from "./do/dream-memory";
 export { DreamEngineDO } from "./do/dream-engine";
+export { TunnelRelayDO } from "./do/tunnel-relay";
 
 // -----------------------------------------------------------------------------
 // Module imports

@@ -24,7 +24,8 @@
       { "name": "GLOBAL_SWARM", "class_name": "GlobalSwarmDO" },
       { "name": "ACCOUNT_MANAGER", "class_name": "AccountManagerDO" },
       { "name": "DREAM_MEMORY", "class_name": "DreamMemoryDO" },
-      { "name": "DREAM_ENGINE", "class_name": "DreamEngineDO" }
+      { "name": "DREAM_ENGINE", "class_name": "DreamEngineDO" },
+      { "name": "TUNNEL_RELAY", "class_name": "TunnelRelayDO" }
     ]
   },
   "kv_namespaces": [
@@ -55,6 +56,7 @@
     { "tag": "v4", "new_sqlite_classes": ["ReputationDO", "ModelRegistryDO", "IncentiveDO", "EdgeSwarmDO", "RegionalSwarmDO", "GlobalSwarmDO"] },
     { "tag": "v5", "new_sqlite_classes": ["AccountManagerDO"] },
     { "tag": "v6", "new_sqlite_classes": ["DreamMemoryDO"] },
-    { "tag": "v7", "new_sqlite_classes": ["DreamEngineDO"] }
+    { "tag": "v7", "new_sqlite_classes": ["DreamEngineDO"] },
+    { "tag": "v8", "new_sqlite_classes": ["TunnelRelayDO"] }
   ]
 }
