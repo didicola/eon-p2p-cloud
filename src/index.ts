@@ -2193,6 +2193,18 @@ export default {
           headers: { "Content-Type": "application/json", ...CORS_HEADERS },
         });
       }
+      if (url.pathname === "/api/version" && method === "GET") {
+        return new Response(
+          JSON.stringify({
+            service: "EON P2P Cloud",
+            version: "3.1",
+            ok: true,
+            deployed: "dd05e092",
+            reconciled: true,
+          }),
+          { headers: { "Content-Type": "application/json", ...CORS_HEADERS } },
+        );
+      }
       if (url.pathname.startsWith("/api/remote/")) {
         return handleRemoteApi(request, env, url);
       }
