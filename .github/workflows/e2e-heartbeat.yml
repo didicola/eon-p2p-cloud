@@ -1,0 +1,29 @@
+name: E2E Heartbeat
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe EON sovereign edge
+        run: |
+          set -uo pipefail
+          fail=0
+          { echo "## E2E Heartbeat"; echo "utc: $(date -Is)"; echo ""; } >> "$GITHUB_STEP_SUMMARY"
+          for u in \
+            "https://eon-p2p-cloud.eon-sovereign.workers.dev/" \
+            "https://eon-p2p-cloud.eon-sovereign.workers.dev/v1/models" \
+            "https://api-groq.eon-sovereign.workers.dev/" ; do
+            code=$(curl -s -m 15 -o /dev/null -w "%{http_code}" "$u" || echo 000)
+            echo "- $code  $u" >> "$GITHUB_STEP_SUMMARY"
+            [ "$code" = "200" ] || fail=1
+          done
+          exit $fail
