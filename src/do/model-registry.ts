@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import { type Env, type ProviderRegistration } from "../types";
 
 /**
@@ -10,7 +11,7 @@ import { type Env, type ProviderRegistration } from "../types";
  *
  * All state is persisted through ctx.storage for crash recovery.
  */
-export class ModelRegistryDO extends DurableObject<Env> {
+export class ModelRegistryDO extends VaultStorageDO<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
   }
@@ -30,7 +31,7 @@ export class ModelRegistryDO extends DurableObject<Env> {
     const key = providerKey(registration.name);
 
     // Merge with existing so we don't lose reliability counters on re-register
-    const existing = await this.ctx.storage.get<ProviderRegistration>(key);
+    const existing = await encGet<ProviderRegistration>(this.ctx.storage, key);
     if (existing) {
       registration.reliability =
         registration.reliability ?? existing.reliability;
@@ -38,7 +39,7 @@ export class ModelRegistryDO extends DurableObject<Env> {
         registration.totalRequests ?? existing.totalRequests;
     }
 
-    await this.ctx.storage.put(key, registration);
+    await this.encPut(key, registration);
     await this.indexProviderModels(registration);
   }
 
@@ -47,16 +48,16 @@ export class ModelRegistryDO extends DurableObject<Env> {
    */
   async unregisterProvider(name: string): Promise<void> {
     const key = providerKey(name);
-    const existing = await this.ctx.storage.get<ProviderRegistration>(key);
+    const existing = await encGet<ProviderRegistration>(this.ctx.storage, key);
     if (existing) {
       // Remove from model indexes
       for (const modelId of existing.models) {
         const idxKey = modelIndexKey(modelId);
         const list =
-          (await this.ctx.storage.get<string[]>(idxKey)) ?? [];
+          (await encGet<string[]>(this.ctx.storage, idxKey)) ?? [];
         const filtered = list.filter((n) => n !== name);
         if (filtered.length > 0) {
-          await this.ctx.storage.put(idxKey, filtered);
+          await this.encPut(idxKey, filtered);
         } else {
           await this.ctx.storage.delete(idxKey);
         }
@@ -72,7 +73,7 @@ export class ModelRegistryDO extends DurableObject<Env> {
     name: string,
   ): Promise<ProviderRegistration | null> {
     return (
-      (await this.ctx.storage.get<ProviderRegistration>(
+      (await this.encGet<ProviderRegistration>(
         providerKey(name),
       )) ?? null
     );
@@ -90,12 +91,12 @@ export class ModelRegistryDO extends DurableObject<Env> {
     region?: string,
   ): Promise<ProviderRegistration[]> {
     const idxKey = modelIndexKey(modelId);
-    const names = await this.ctx.storage.get<string[]>(idxKey);
+    const names = await encGet<string[]>(this.ctx.storage, idxKey);
     if (!names || names.length === 0) return [];
 
     const providers: ProviderRegistration[] = [];
     for (const name of names) {
-      const reg = await this.ctx.storage.get<ProviderRegistration>(
+      const reg = await this.encGet<ProviderRegistration>(
         providerKey(name),
       );
       if (reg) {
@@ -122,7 +123,7 @@ export class ModelRegistryDO extends DurableObject<Env> {
   async getAllModels(): Promise<
     { modelId: string; providerCount: number }[]
   > {
-    const list = await this.ctx.storage.list<string[]>({
+    const list = await this.encList<string[]>({
       prefix: "idx:model:",
     });
     const models: { modelId: string; providerCount: number }[] = [];
@@ -141,7 +142,7 @@ export class ModelRegistryDO extends DurableObject<Env> {
    */
   async recordUsage(providerName: string, success: boolean): Promise<void> {
     const key = providerKey(providerName);
-    const reg = await this.ctx.storage.get<ProviderRegistration>(key);
+    const reg = await encGet<ProviderRegistration>(this.ctx.storage, key);
     if (!reg) return;
 
     reg.totalRequests = (reg.totalRequests ?? 0) + 1;
@@ -152,7 +153,7 @@ export class ModelRegistryDO extends DurableObject<Env> {
       ? current + alpha * (1.0 - current)
       : current * (1.0 - alpha);
 
-    await this.ctx.storage.put(key, reg);
+    await this.encPut(key, reg);
   }
 
   // -----------------------------------------------------------------------
@@ -168,10 +169,10 @@ export class ModelRegistryDO extends DurableObject<Env> {
     for (const modelId of registration.models) {
       const idxKey = modelIndexKey(modelId);
       const list =
-        (await this.ctx.storage.get<string[]>(idxKey)) ?? [];
+        (await encGet<string[]>(this.ctx.storage, idxKey)) ?? [];
       if (!list.includes(registration.name)) {
         list.push(registration.name);
-        await this.ctx.storage.put(idxKey, list);
+        await this.encPut(idxKey, list);
       }
     }
   }

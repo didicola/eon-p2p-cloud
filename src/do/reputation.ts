@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import { type Env } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@ const STORAGE_PREFIX = "results:";
  *   - A failed task reduces reliability proportionally.
  *   - Latency is a simple moving average over the window.
  */
-export class ReputationDO extends DurableObject<Env> {
+export class ReputationDO extends VaultStorageDO<Env> {
   /** In-memory cache of the sliding window per peer.  Populated lazily. */
   private results = new Map<string, RepResult[]>();
 
@@ -82,7 +83,7 @@ export class ReputationDO extends DurableObject<Env> {
     }
 
     this.results.set(peerId, entries);
-    await this.ctx.storage.put<RepResult[]>(
+    await this.encPut(
       `${STORAGE_PREFIX}${peerId}`,
       entries,
     );
@@ -127,7 +128,7 @@ export class ReputationDO extends DurableObject<Env> {
    */
   async getAllReputations(): Promise<Record<string, PeerReputation>> {
     const result: Record<string, PeerReputation> = {};
-    const stored = await this.ctx.storage.list<RepResult[]>({
+    const stored = await this.encList<RepResult[]>({
       prefix: STORAGE_PREFIX,
     });
     for (const [key, entries] of stored) {
@@ -164,7 +165,7 @@ export class ReputationDO extends DurableObject<Env> {
   // -----------------------------------------------------------------------
 
   private async loadFromStorage(peerId: string): Promise<RepResult[]> {
-    const stored = await this.ctx.storage.get<RepResult[]>(
+    const stored = await this.encGet<RepResult[]>(
       `${STORAGE_PREFIX}${peerId}`,
     );
     const entries = stored ?? [];

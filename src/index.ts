@@ -50,6 +50,7 @@ import { handleWebSocketUpgrade } from "./peer-protocol";
 import { cachedInference } from "./cache";
 import { verifyTask } from "./verification";
 import { routeInference, getRoutableModels } from "./unified-router";
+import { DNA_MANIFEST } from "./dna";
 
 export type { Env } from "./types";
 
@@ -489,8 +490,25 @@ export default {
           (url.pathname === "/v1/chat/completions" || url.pathname === "/chat") &&
         method === "POST"
       ) {
-        const body = (await request.json()) as ChatRequest;
+        const authErr = requireAuth(request, env);
+        if (authErr) return authErr;
+        let body: any = (await request.json()) as ChatRequest;
         let modelName = body.model || "llama-3.3-70b";
+        let e2eEncrypted = false;
+        if (body.encrypted && body.payload) {
+          try {
+            const e2eKey = await deriveE2EKey(env.AUTH_TOKEN || "");
+            const plain = await e2eDecrypt(e2eKey, body.payload);
+            body = JSON.parse(plain) as ChatRequest;
+            modelName = body.model || "llama-3.3-70b";
+            e2eEncrypted = true;
+          } catch (e) {
+            return new Response(JSON.stringify({ error: "E2E decryption failed", detail: String(e) }), {
+              status: 400,
+              headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+            });
+          }
+        }
 
         // Resolve agent type names to Workers AI models via AGENT_ROUTES
         const agentRoute = AGENT_ROUTES[modelName];
@@ -1952,6 +1970,252 @@ export default {
       }
 
       // ─────────────────────────────────────────────────────────────
+      // Tunnel relay bridge (reconciled from live)
+      // ─────────────────────────────────────────────────────────────
+      if (url.pathname === "/_tunnel") {
+        const tAuth = request.headers.get("Authorization") || "";
+        if (tAuth !== `Bearer ${env.AUTH_TOKEN}`)
+          return new Response(JSON.stringify({ error: "unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          });
+        const tunnelId = url.searchParams.get("id") || "default";
+        const doId = env.TUNNEL_RELAY.idFromName(`tunnel-${tunnelId}`);
+        const stub = env.TUNNEL_RELAY.get(doId);
+        return stub.fetch(request);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // ─────────────────────────────────────────────────────────────
+      // Fleet DNS + self-heal deploy (reconciled from live)
+      // ─────────────────────────────────────────────────────────────
+      if (url.pathname === "/api/dns/resolve" && method === "GET") {
+        const host = url.searchParams.get("host") || "";
+        const FLEET_DNS: Record<string, { worker: string; ip: string; port: number }> = {
+          "cloud.eon": { worker: "eon-p2p-cloud", ip: "192.168.1.73", port: 443 },
+          "hub.eon": { worker: "eon-hub", ip: "192.168.1.73", port: 443 },
+          "ide.eon": { worker: "eon-fleet-hub", ip: "192.168.1.73", port: 443 },
+          "relay.eon": { worker: "home-cloud-relay", ip: "192.168.1.73", port: 443 },
+          "sentinel.eon": { worker: "eon-cloud-sentinel", ip: "192.168.1.73", port: 443 },
+          "alpha.eon": { worker: "eon-cloud-backup-alpha", ip: "192.168.1.73", port: 443 },
+          "bravo.eon": { worker: "eon-cloud-backup-bravo", ip: "192.168.1.73", port: 443 },
+          "sovereign.eon": { worker: "eon-sovereign-core", ip: "192.168.1.73", port: 443 },
+          "dns.eon": { worker: "eon-p2p-cloud", ip: "192.168.1.73", port: 443 },
+          "runtime.eon": { worker: "eon-p2p-cloud", ip: "192.168.1.73", port: 443 },
+          "mesh.eon": { worker: "eon-p2p-cloud", ip: "192.168.1.73", port: 443 },
+          "dream.eon": { worker: "eon-p2p-cloud", ip: "192.168.1.73", port: 443 },
+          "vault.eon": { worker: "eon-p2p-cloud", ip: "192.168.1.73", port: 443 },
+          "agent.eon": { worker: "eon-cloud-sentinel", ip: "192.168.1.73", port: 443 },
+          "opencode.eon": { worker: "eon-fleet-hub", ip: "192.168.1.73", port: 443 }
+        };
+        const entry = FLEET_DNS[host] || FLEET_DNS[host.replace(/^eon-/, "").replace(/-cloud$/, "")];
+        if (entry) {
+          return new Response(JSON.stringify({
+            host, ip: entry.ip, port: entry.port, worker: entry.worker,
+            note: "Samsung reverse-proxies this to CF Worker"
+          }), {
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+          });
+        }
+        if (host.endsWith(".eon") || host === "eon") {
+          return new Response(JSON.stringify({
+            host, ip: "192.168.1.73", port: 443, worker: "eon-p2p-cloud",
+            note: "Wildcard *.eon → Samsung reverse proxy"
+          }), {
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+          });
+        }
+        return new Response(JSON.stringify({ host, error: "not an .eon domain" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        });
+      }
+      if (url.pathname === "/api/fleet/dns-mapping" && method === "GET") {
+        const FLEET_MAP: Record<string, string> = {
+          "cloud.eon": "eon-p2p-cloud",
+          "hub.eon": "eon-hub",
+          "ide.eon": "eon-fleet-hub",
+          "relay.eon": "home-cloud-relay",
+          "sentinel.eon": "eon-cloud-sentinel",
+          "alpha.eon": "eon-cloud-backup-alpha",
+          "bravo.eon": "eon-cloud-backup-bravo",
+          "sovereign.eon": "eon-sovereign-core",
+          "dns.eon": "eon-p2p-cloud",
+          "runtime.eon": "eon-p2p-cloud",
+          "mesh.eon": "eon-p2p-cloud",
+          "dream.eon": "eon-p2p-cloud",
+          "vault.eon": "eon-p2p-cloud",
+          "agent.eon": "eon-cloud-sentinel",
+          "opencode.eon": "eon-fleet-hub"
+        };
+        return new Response(JSON.stringify({ mapping: FLEET_MAP, proxy_ip: "192.168.1.73" }, null, 2), {
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        });
+      }
+      if (url.pathname === "/api/fleet/deploy" && method === "POST") {
+        const authErr = requireAuth(request, env);
+        if (authErr) return authErr;
+        const acctId = (env as any).CF_ACCOUNT_ID || "87f71cf268d9b69fdfd2725afbfb4483";
+        const apiToken = (env as any).CF_API_TOKEN;
+        if (!apiToken) {
+          return new Response(JSON.stringify({ error: "CF_API_TOKEN not configured" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+          });
+        }
+        const fleet = [
+          "eon-p2p-cloud", "eon-cloud-backup-alpha", "eon-cloud-backup-bravo", "eon-hub",
+          "home-cloud-relay", "eon-cloud-sentinel", "eon-sovereign-core", "eon-fleet-hub"
+        ];
+        const bindings = [
+          { name: "ACCOUNT_MANAGER", type: "durable_object_namespace", namespace_id: "cfc1763365e54abeb4abf59a7562165e" },
+          { name: "AI", type: "ai", project: "<catalog>" },
+          { name: "AUTH_TOKEN", type: "plain_text", text: env.AUTH_TOKEN || "" },
+          { name: "CACHE_KV", type: "kv_namespace", namespace_id: "7e10e1e6f1cf4f9f9923d2175c8d1222" },
+          { name: "CLOUD_AGENT", type: "durable_object_namespace", namespace_id: "bb20596fb739430698c707ef25179fac" },
+          { name: "DREAM_ENGINE", type: "durable_object_namespace", namespace_id: "7708865c1f8f427b9edc1977cbe4e61e" },
+          { name: "DREAM_MEMORY", type: "durable_object_namespace", namespace_id: "c3b45127965e4e3592fbbc503fdadc8d" },
+          { name: "EDGE_SWARM", type: "durable_object_namespace", namespace_id: "ef6614f962974a34bb05e90e443d7210" },
+          { name: "GLOBAL_SWARM", type: "durable_object_namespace", namespace_id: "2210d5d279724739a6ab058664f0b21d" },
+          { name: "INCENTIVES", type: "durable_object_namespace", namespace_id: "259e1fc1d2d247818cf0b3cd35595a80" },
+          { name: "MODEL_REGISTRY", type: "durable_object_namespace", namespace_id: "cae41f14e91d4deeb77b3fcfe61c33b2" },
+          { name: "OPENCODE", type: "durable_object_namespace", namespace_id: "8a8a471adf4f4546b4376b32ef0be9cb" },
+          { name: "P2P_SWARM", type: "durable_object_namespace", namespace_id: "752a57d71a4a4b359f4303e043f96e39" },
+          { name: "RATE_LIMIT_KV", type: "kv_namespace", namespace_id: "1962bd59cfc2410ab72213154da4dd1a" },
+          { name: "REGIONAL_SWARM", type: "durable_object_namespace", namespace_id: "48da944beadc4cbdad3913bf4fb72b5b" },
+          { name: "REPUTATION", type: "durable_object_namespace", namespace_id: "f5099cad3f6e448687e43406e44f1abb" },
+          { name: "TASK_QUEUE", type: "queue", queue_name: "eon-task-queue" },
+          { name: "CF_API_TOKEN", type: "plain_text", text: apiToken },
+          { name: "CF_ACCOUNT_ID", type: "plain_text", text: acctId }
+        ];
+        const myself = new URL(request.url).hostname.split(".")[0];
+        const srcResp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${acctId}/workers/scripts/${myself}`, {
+          headers: { Authorization: `Bearer ${apiToken}` }
+        });
+        if (!srcResp.ok) {
+          return new Response(JSON.stringify({ error: "failed to fetch own script", status: srcResp.status }), {
+            status: 502,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+          });
+        }
+        const srcCT = srcResp.headers.get("Content-Type") || "";
+        const srcBody = new Uint8Array(await srcResp.arrayBuffer());
+        let scriptBytes: Uint8Array;
+        const boundaryMatch = srcCT.match(/boundary=(.+)/);
+        if (boundaryMatch) {
+          const boundary = boundaryMatch[1];
+          const boundaryBytes = new TextEncoder().encode(`--${boundary}`);
+          const headerEnd = new TextEncoder().encode("\r\n\r\n");
+          const firstBound = findBytes(srcBody, boundaryBytes, 0);
+          if (firstBound >= 0) {
+            const afterBound = firstBound + boundaryBytes.length;
+            const headerStart = findBytes(srcBody, headerEnd, afterBound);
+            if (headerStart >= 0) {
+              const contentStart = headerStart + headerEnd.length;
+              const nextBound = findBytes(srcBody, boundaryBytes, contentStart);
+              const contentEnd = nextBound > contentStart ? nextBound - 2 : srcBody.length;
+              scriptBytes = srcBody.slice(contentStart, contentEnd);
+            } else {
+              scriptBytes = srcBody;
+            }
+          } else {
+            scriptBytes = srcBody;
+          }
+        } else {
+          scriptBytes = srcBody;
+        }
+        const bodyStr = await request.text().catch(() => "{}");
+        const opts = bodyStr ? JSON.parse(bodyStr) : {};
+        const targets: string[] = opts.targets || fleet;
+        const results: Record<string, string> = {};
+        for (let i = 0; i < targets.length; i += 2) {
+          const batch = targets.slice(i, i + 2);
+          await Promise.all(batch.map(async (name: string) => {
+            try {
+              const boundary = `----EON-DEPLOY-${name}-${Date.now()}`;
+              const metadata = JSON.stringify({
+                main_module: "worker.js",
+                bindings,
+                compatibility_date: "2026-07-25",
+                compatibility_flags: ["nodejs_compat"]
+              });
+              const parts: Uint8Array[] = [];
+              const enc = new TextEncoder();
+              parts.push(enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n${metadata}\r\n`));
+              parts.push(enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="worker.js"\r\nContent-Type: application/javascript+module\r\n\r\n`));
+              parts.push(new Uint8Array(scriptBytes));
+              parts.push(enc.encode(`\r\n--${boundary}--\r\n`));
+              const totalLen = parts.reduce((s, p) => s + p.length, 0);
+              const combined = new Uint8Array(totalLen);
+              let offset = 0;
+              for (const part of parts) {
+                combined.set(part, offset);
+                offset += part.length;
+              }
+              const deployResp = await fetch(
+                `https://api.cloudflare.com/client/v4/accounts/${acctId}/workers/scripts/${name}`,
+                { method: "PUT", headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": `multipart/form-data; boundary=${boundary}` }, body: combined }
+              );
+              const deployData = (await deployResp.json()) as { success: boolean; errors: unknown[] };
+              await fetch(`https://api.cloudflare.com/client/v4/accounts/${acctId}/workers/scripts/${name}/subdomain`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled: true })
+              }).catch(() => {});
+              results[name] = deployData.success ? "OK" : `FAIL: ${JSON.stringify(deployData.errors)}`;
+            } catch (e) {
+              results[name] = `ERROR: ${String(e).slice(0, 100)}`;
+            }
+          }));
+        }
+        const ok = Object.values(results).filter((v) => v === "OK").length;
+        return new Response(JSON.stringify({
+          deployed: ok,
+          total: targets.length,
+          bundle: myself,
+          results,
+          message: `Fleet deploy: ${ok}/${targets.length} workers updated from ${myself}`
+        }, null, 2), {
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        });
+      }
+
+      // Sovereign dashboard + DNA identity pages (reconciled from live)
+      // ─────────────────────────────────────────────────────────────
+      if (url.pathname === "/" && method === "GET") {
+        return renderSovereignDashboard(request, env);
+      }
+      if (url.pathname === "/dna" && method === "GET") {
+        return renderDnaPage(request);
+      }
+      if (url.pathname === "/api/dna" && method === "GET") {
+        return new Response(JSON.stringify(DNA_MANIFEST, null, 2), {
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        });
+      }
+      if (url.pathname.startsWith("/api/remote/")) {
+        return handleRemoteApi(request, env, url);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // Tunnel relay fallback — unmatched requests proxy through
+      // TunnelRelayDO (reconciled from live)
+      // ─────────────────────────────────────────────────────────────
+      {
+        const doId = env.TUNNEL_RELAY.idFromName("tunnel-default");
+        const stub = env.TUNNEL_RELAY.get(doId);
+        const proxyReq = new Request(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body:
+            request.method !== "GET" && request.method !== "HEAD"
+              ? request
+              : undefined,
+        });
+        return await stub.fetch(proxyReq);
+      }
+
+      // ─────────────────────────────────────────────────────────────
       // Fallback — informational message
       // ─────────────────────────────────────────────────────────────
       return new Response(
@@ -2318,4 +2582,511 @@ function extractMeta(html: string): Record<string, string> {
     meta[m[2].toLowerCase()] = m[1].slice(0, 500);
   }
   return meta;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Sovereign edge/dashboard/remote handlers (reconciled from LIVE bundle
+// 2026-09-25 — these existed only in the deployed worker, never in git)
+// ─────────────────────────────────────────────────────────────
+function escHtml(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function clampScore(n) {
+  if (Number.isNaN(n)) return 100;
+  return Math.max(0, Math.min(100, n));
+}
+function envInt(E, key, fallback = 0) {
+   const raw = E[key];
+   if (typeof raw !== "string" || raw.trim() === "") return fallback;
+   const n = parseInt(raw, 10);
+   return Number.isNaN(n) ? fallback : n;
+ }
+ const FALLBACK_MIRRORS = [
+   { ref: "code-mirror", url: "https://github.com/eon-sovereign/eon-p2p-cloud", kind: "earthly", note: "code mirror" },
+   { ref: "ui-mirror", url: "https://eon-p2p-ui.pages.dev", kind: "earthly", note: "UI mirror" }
+ ];
+ const DEFAULT_EDGE_ORGANS = [
+   { name: "EONHub", port: 8201, label: "EON_MATRIX" },
+   { name: "EONModels", port: 8090, label: "blind-proxy" },
+   { name: "EON-Torch", port: 8089, label: "companion" },
+   { name: "EON-Edge", port: 8088, label: "cloudbridge" }
+ ];
+ const COUNT_ORGANS = [
+   { name: "EON-Memory", envKey: "EON_MEMORY_COUNT" },
+   { name: "EON-Dream", envKey: "EON_DREAM_COUNT" },
+   { name: "EON-Remote", envKey: "EON_REMOTE_COUNT" },
+   { name: "EON-Wrangler", envKey: "EON_WRANGLER_COUNT" }
+ ];
+ function readEdgeOrgans(E) {
+  const raw = E.EON_EDGE_PORTS;
+  if (raw) {
+    try {
+      const v = JSON.parse(raw);
+      if (Array.isArray(v)) {
+        const out = [];
+        for (const o of v) {
+          const rec = o;
+          if (rec && typeof rec.name === "string" && typeof rec.port === "number" && rec.port > 0) {
+            out.push({ name: rec.name, port: rec.port, label: typeof rec.label === "string" ? rec.label : `:${rec.port}` });
+          }
+        }
+        if (out.length) return out;
+      } else if (v && typeof v === "object") {
+        const out = [];
+        for (const [name, port] of Object.entries(v)) {
+          const p = parseInt(String(port), 10);
+          if (p > 0) out.push({ name, port: p, label: name });
+        }
+        if (out.length) return out;
+      }
+    } catch {
+    }
+  }
+  return DEFAULT_EDGE_ORGANS.map((o) => ({ ...o }));
+}
+async function probeEdgePort(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/`, {
+      signal: AbortSignal.timeout(1500)
+    });
+    return res.status < 500;
+  } catch {
+    return false;
+  }
+}
+function readEdgeStatus(E) {
+  const raw = E.EON_EDGE_STATUS;
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw);
+    if (v && typeof v === "object") {
+      const out = {};
+      for (const [k, val] of Object.entries(v)) out[k] = String(val);
+      return out;
+    }
+    if (typeof v === "string") return { "*": v };
+  } catch {
+  }
+  return {};
+}
+async function readMirrorRefs(E) {
+  const out = [];
+  try {
+    if (E.EON_KV) {
+      const idx = await E.EON_KV.get("remote:index");
+      if (idx) {
+        const parsed = JSON.parse(idx);
+        if (Array.isArray(parsed)) {
+          for (const m of parsed) if (m && typeof m === "object") out.push(m);
+        }
+      }
+    }
+  } catch {
+  }
+  if (out.length === 0 && E.EON_REMOTE_MIRRORS) {
+    try {
+      const parsed = JSON.parse(E.EON_REMOTE_MIRRORS);
+      if (Array.isArray(parsed)) {
+        for (const m of parsed) if (m && typeof m === "object") out.push(m);
+      }
+    } catch {
+    }
+  }
+  return out.length ? out : FALLBACK_MIRRORS;
+}
+function formatWhen(iso) {
+  if (!iso || iso.trim() === "") return "pending first run";
+  const num = /^\d+$/.test(iso.trim()) ? parseInt(iso.trim(), 10) : NaN;
+  const t = Number.isNaN(num) ? new Date(iso).getTime() : num * 1e3;
+  if (Number.isNaN(t)) return escHtml(iso);
+  return new Date(t).toISOString().replace("T", " ").slice(0, 16) + " UTC";
+}
+function badgeHtml(status) {
+  const s = status === "up" ? "up" : status === "down" ? "down" : "partial";
+  return `<span class="badge b-${s}">${s.toUpperCase()}</span>`;
+}
+async function renderSovereignDashboard(request, env) {
+  const E = env;
+  const url = new URL(request.url);
+  let score = 100;
+  if (E.EON_SOVEREIGNTY_SCORE) {
+    const n = parseInt(E.EON_SOVEREIGNTY_SCORE, 10);
+    if (!Number.isNaN(n)) score = n;
+  }
+  score = clampScore(score);
+  const fallbackPct = 100 - score;
+  const edgeOrgans = readEdgeOrgans(E);
+  const edgeStatus = readEdgeStatus(E);
+  const probeResults = await Promise.all(
+    edgeOrgans.map(async (o) => ({ name: o.name, ok: await probeEdgePort(o.port) }))
+  );
+  const portCards = edgeOrgans.map((o) => {
+    const probe = probeResults.find((p) => p.name === o.name);
+    let status;
+    let source;
+    if (probe && probe.ok) {
+      status = "up";
+      source = "probe";
+    } else {
+      const fromEnv = edgeStatus[`127.0.0.1:${o.port}`] || edgeStatus[String(o.port)] || edgeStatus[o.name] || edgeStatus[o.name.toLowerCase()] || edgeStatus["*"];
+      if (fromEnv) {
+        status = fromEnv;
+        source = "env";
+      } else {
+        status = "partial";
+        source = "edge-default";
+      }
+    }
+    return {
+      name: o.name,
+      badge: status === "up" ? "up" : status === "down" ? "down" : "partial",
+      meta: `:${o.port} \xB7 ${o.label} \xB7 ${source}`,
+      detail: `127.0.0.1:${o.port}`
+    };
+  });
+  const countCards = COUNT_ORGANS.map((o) => {
+    const n = envInt(E, o.envKey, 0);
+    let detail = `${n} records`;
+    if (o.name === "EON-Dream") detail = `${n} dreams \xB7 ${envInt(E, "EON_DREAM_INSIGHTS", 0)} insights \xB7 ${envInt(E, "EON_DREAM_MEMORIES", 0)} memories`;
+    if (o.name === "EON-Memory") detail = `${n} memories`;
+    if (o.name === "EON-Remote") detail = `${n} mirrors`;
+    if (o.name === "EON-Wrangler") detail = `${n} kv rows`;
+    return { name: o.name, badge: n > 0 ? "up" : "partial", meta: `count \xB7 env ${o.envKey}`, detail };
+  });
+  const organs = [...portCards, ...countCards];
+  const mirrors = await readMirrorRefs(E);
+  const mirrorRows = mirrors.length ? mirrors.slice(0, 12).map(
+    (m) => `<div class="mirror"><code>${escHtml(m.ref || m.url || "?")}</code><span>${escHtml(m.url || m.note || "")}</span></div>`
+  ).join("") : `<div class="muted">no mirrored earthly resources</div>`;
+  const dreamLast = formatWhen(E.EON_DREAM_LAST);
+  const dreamNext = formatWhen(E.EON_DREAM_NEXT);
+  const dreamCycles = E.EON_DREAM_CYCLES ? escHtml(E.EON_DREAM_CYCLES) : "\u2014";
+  const dreamPill = E.EON_DREAM_LAST && E.EON_DREAM_LAST.trim() !== "" ? "trained" : "pending first run";
+  const origin = escHtml(E.EON_CLOUD || url.origin);
+  const updatedAt = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 16) + " UTC";
+  const fallbackLines = envInt(E, "EON_FALLBACK_COUNT", 0);
+  const cardHtml = organs.map(
+    (c) => `<div class="card">\n        <div class="org"><span class="dot dot-${c.badge}"></span><span class="org-name">${escHtml(c.name)}</span>${badgeHtml(c.badge)}</div>\n        <div class="meta">${escHtml(c.meta)}</div>\n        <div class="detail">${escHtml(c.detail)}</div>\n      </div>`
+  ).join("");
+  const html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<meta http-equiv="refresh" content="60">\n<title>EON Sovereign Cloud \u2014 Dashboard</title>\n<style>\n*{box-sizing:border-box;margin:0;padding:0}\nbody{background:#0b0e14;color:#cbd5e1;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:24px;line-height:1.5}\n.wrap{max-width:1080px;margin:0 auto}\nheader{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;border-bottom:1px solid #232a3a;padding-bottom:14px;margin-bottom:18px}\nh1{font-size:20px;letter-spacing:2px;color:#e2e8f0}\nh1 span{color:#22c55e}\n.sub{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:1px}\n.updated{color:#475569;font-size:11px;text-align:right}\nh2{font-size:12px;color:#e2e8f0;text-transform:uppercase;letter-spacing:2px;margin:22px 0 10px}\n.gauge-row{display:flex;gap:24px;align-items:center;flex-wrap:wrap;background:#12161f;border:1px solid #232a3a;border-radius:14px;padding:20px}\n.gauge{width:150px;height:150px;border-radius:50%;display:grid;place-items:center;flex:0 0 auto}\n.gauge-hole{width:108px;height:108px;background:#0b0e14;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center}\n.gauge-num{font-size:30px;font-weight:800;color:#e2e8f0;line-height:1}\n.gauge-unit{font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-top:4px}\n.gauge-side{flex:1;min-width:230px}\n.gauge-title{font-size:13px;color:#e2e8f0;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px}\n.split{display:flex;height:12px;border-radius:6px;overflow:hidden;margin:10px 0 6px;border:1px solid #1e2534}\n.split-sovereign{background:#22c55e}\n.split-fallback{background:#64748b}\n.split-label{display:flex;justify-content:space-between;font-size:11px;color:#94a3b8}\n.legend{display:flex;gap:16px;font-size:11px;color:#94a3b8;margin-top:10px;flex-wrap:wrap;align-items:center}\n.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}\n.card{background:#12161f;border:1px solid #232a3a;border-radius:12px;padding:12px 14px}\n.org{display:flex;align-items:center;gap:9px}\n.dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}\n.dot-up{background:#22c55e;box-shadow:0 0 8px #22c55e}\n.dot-down{background:#ef4444;box-shadow:0 0 8px #ef4444}\n.dot-partial{background:#f59e0b;box-shadow:0 0 8px #f59e0b}\n.org-name{font-weight:700;color:#e2e8f0;flex:1;font-size:14px}\n.badge{font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;letter-spacing:1px}\n.b-up{background:#14532d;color:#4ade80}\n.b-down{background:#7f1d1d;color:#f87171}\n.b-partial{background:#78350f;color:#fbbf24}\n.meta{color:#64748b;font-size:11px;margin-top:6px}\n.detail{color:#475569;font-size:11px;margin-top:2px}\n.panels{display:grid;grid-template-columns:1fr 1fr;gap:14px}\n.panel{background:#12161f;border:1px solid #232a3a;border-radius:12px;padding:14px}\n.panel h3{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}\n.pill{font-size:10px;color:#94a3b8;border:1px solid #232a3a;border-radius:20px;padding:2px 8px}\n.row{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:5px 0;border-bottom:1px dashed #1e2534}\n.row:last-child{border-bottom:none}\n.row span{color:#94a3b8}\n.row code{color:#e2e8f0}\n.mirror{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:5px 0;border-bottom:1px dashed #1e2534}\n.mirror code{color:#e2e8f0}\n.mirror span{color:#64748b;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}\n.muted{color:#64748b;font-size:12px}\n.foot-note{color:#475569;font-size:10px;margin-top:10px}\nfooter{margin-top:22px;border-top:1px solid #232a3a;padding-top:12px;color:#475569;font-size:11px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}\ncode.inline{background:#12161f;border:1px solid #232a3a;border-radius:5px;padding:1px 6px;color:#94a3b8}\n@media(max-width:760px){.panels{grid-template-columns:1fr}.updated{text-align:left}}\n</style>\n</head>\n<body>\n<div class="wrap">\n<header>\n  <div>\n    <h1>EON <span>Sovereign</span> Cloud</h1>\n    <div class="sub">sovereign organs primary \xB7 earthly fallback only</div>\n  </div>\n  <div class="updated">updated <time>${updatedAt}</time><br><code class="inline">${origin}</code></div>\n</header>\n\n<section class="gauge-row">\n  <div class="gauge" style="background:conic-gradient(#22c55e 0% ${score}%, #2b3348 ${score}% 100%)">\n    <div class="gauge-hole"><div class="gauge-num">${score}</div><div class="gauge-unit">% sovereign</div></div>\n  </div>\n  <div class="gauge-side">\n    <div class="gauge-title">Sovereignty Score</div>\n    <div class="split"><div class="split-sovereign" style="width:${score}%"></div><div class="split-fallback" style="width:${fallbackPct}%"></div></div>\n    <div class="split-label"><span>${score}% sovereign</span><span>${fallbackPct}% earthly fallback</span></div>\n    <div class="legend">\n      <span><span class="dot dot-up"></span> sovereign</span>\n      <span><span class="dot dot-partial"></span> partial</span>\n      <span><span class="dot dot-down"></span> down</span>\n    </div>\n  </div>\n</section>\n\n<section>\n  <h2>Organs \xB7 8</h2>\n  <div class="grid">${cardHtml}</div>\n</section>\n\n<div class="panels">\n  <section class="panel">\n    <h3>Dream Status <span class="pill">${dreamPill}</span></h3>\n    <div class="row"><span>last training run</span><code>${dreamLast}</code></div>\n    <div class="row"><span>next scheduled</span><code>${dreamNext}</code></div>\n    <div class="row"><span>cycle count</span><code>${dreamCycles}</code></div>\n    <div class="row"><span>data</span><code>${envInt(E, "EON_DREAM_COUNT", 0)} dreams \xB7 ${envInt(E, "EON_DREAM_INSIGHTS", 0)} insights \xB7 ${envInt(E, "EON_DREAM_MEMORIES", 0)} memories</code></div>\n  </section>\n  <section class="panel">\n    <h3>Remote Access <span class="pill">earthly mirror</span></h3>\n    ${mirrorRows}\n    <div class="foot-note">mirrored earthly resources \u2014 fallback only, never primary \xB7 source: EON_KV remote:index / env / in-memory</div>\n  </section>\n</div>\n\n<footer>\n  <span>Earthly Fallback Layer: <code class="inline">~/.eon/fallback.log</code> (${fallbackLines} lines) \xB7 score source <code class="inline">~/.eon/sovereignty.json</code></span>\n  <span>EON Sovereign Cloud \xB7 dashboard v1.0</span>\n</footer>\n</div>\n</body>\n</html>`;
+  return new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8", ...CORS_HEADERS }
+  });
+}
+function escDna(v) {
+  return String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function renderDnaPage(request) {
+  const url = new URL(request.url);
+  const updatedAt = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 16) + " UTC";
+  const topology = DNA_MANIFEST.mesh_topology || {};
+  const topologyRows = Object.entries(topology).map(
+    ([k, v]) => `<div class="row"><span>${escDna(k)}</span><code>${escDna(v)}</code></div>`
+  ).join("");
+  const sources = DNA_MANIFEST.dna_sources || [];
+  const sourceRows = sources.map(
+    (s) => `<div class="mirror"><code>${escDna(s.machine)}</code><span>${escDna(s.path)}${s.components ? " \xB7 " + escDna(s.components.join(", ")) : ""}</span></div>`
+  ).join("");
+  const grid = DNA_MANIFEST.model_grid || {};
+  const gridRows = Object.entries(grid).map(([k, v]) => `<div class="row"><span>${escDna(k)}</span><code>${escDna(v)}</code></div>`).join("");
+  const brain = DNA_MANIFEST.core_brain || {};
+  const brainRows = Object.entries(brain).map(([k, v]) => `<div class="row"><span>${escDna(k)}</span><code>${escDna(v)}</code></div>`).join("");
+  const docs = DNA_MANIFEST.architecture_docs || [];
+  const docRows = docs.map((d) => `<div class="row"><span>doc</span><code>${escDna(d)}</code></div>`).join("");
+  const html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>EON Sovereign DNA \u2014 Mesh Identity</title>\n<style>\n*{box-sizing:border-box;margin:0;padding:0}\nbody{background:#0b0e14;color:#cbd5e1;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:24px;line-height:1.5}\n.wrap{max-width:1080px;margin:0 auto}\nheader{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;border-bottom:1px solid #232a3a;padding-bottom:14px;margin-bottom:18px}\nh1{font-size:20px;letter-spacing:2px;color:#e2e8f0}\nh1 span{color:#22c55e}\n.sub{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:1px}\n.updated{color:#475569;font-size:11px;text-align:right}\nh2{font-size:12px;color:#e2e8f0;text-transform:uppercase;letter-spacing:2px;margin:22px 0 10px}\n.panels{display:grid;grid-template-columns:1fr 1fr;gap:14px}\n.panel{background:#12161f;border:1px solid #232a3a;border-radius:12px;padding:14px}\n.panel h3{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px}\n.row{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:5px 0;border-bottom:1px dashed #1e2534}\n.row:last-child{border-bottom:none}\n.row span{color:#94a3b8;flex:0 0 auto}\n.row code{color:#e2e8f0;text-align:right;word-break:break-all}\n.mirror{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:5px 0;border-bottom:1px dashed #1e2534}\n.mirror code{color:#e2e8f0}\n.mirror span{color:#64748b;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}\n.badge{font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;letter-spacing:1px;background:#14532d;color:#4ade80}\nfooter{margin-top:22px;border-top:1px solid #232a3a;padding-top:12px;color:#475569;font-size:11px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}\n@media(max-width:760px){.panels{grid-template-columns:1fr}.updated{text-align:left}}\n</style>\n</head>\n<body>\n<div class="wrap">\n<header>\n  <div>\n    <h1>EON <span>DNA</span> \u2014 Sovereign Mesh Identity</h1>\n    <div class="sub">twin id ${escDna(DNA_MANIFEST.twin_id)} \xB7 ${escDna(DNA_MANIFEST.name)} \xB7 free forever</div>\n  </div>\n  <div class="updated">updated <time>${updatedAt}</time><br><code class="inline">${escDna(url.origin)}</code><br><span class="badge">24/7 global</span></div>\n</header>\n\n<div class="panels">\n  <section class="panel">\n    <h3>Mesh Topology</h3>\n    ${topologyRows || '<div class="row"><span>\u2014</span><code>none</code></div>'}\n  </section>\n  <section class="panel">\n    <h3>DNA Sources</h3>\n    ${sourceRows || '<div class="row"><span>\u2014</span><code>none</code></div>'}\n  </section>\n</div>\n\n<div class="panels">\n  <section class="panel">\n    <h3>Model Grid</h3>\n    ${gridRows || '<div class="row"><span>\u2014</span><code>none</code></div>'}\n  </section>\n  <section class="panel">\n    <h3>Core Brain</h3>\n    ${brainRows || '<div class="row"><span>\u2014</span><code>none</code></div>'}\n  </section>\n</div>\n\n<div class="panels">\n  <section class="panel">\n    <h3>Architecture Docs</h3>\n    ${docRows || '<div class="row"><span>\u2014</span><code>none</code></div>'}\n  </section>\n  <section class="panel">\n    <h3>Identity</h3>\n    <div class="row"><span>twin_id</span><code>${escDna(DNA_MANIFEST.twin_id)}</code></div>\n    <div class="row"><span>name</span><code>${escDna(DNA_MANIFEST.name)}</code></div>\n    <div class="row"><span>created</span><code>${escDna(DNA_MANIFEST.created_at)}</code></div>\n    <div class="row"><span>created_by</span><code>${escDna(DNA_MANIFEST.created_by)}</code></div>\n    <div class="row"><span>purpose</span><code>${escDna(DNA_MANIFEST.purpose)}</code></div>\n  </section>\n</div>\n\n<footer>\n  <span>Public-safe mirror \u2014 auth tokens excluded \xB7 source of truth: local TWIN_MANIFEST.json</span>\n  <span>EON Sovereign DNA \xB7 v${escDna(DNA_MANIFEST.manifest_version)}</span>\n</footer>\n</div>\n</body>\n</html>`;
+  return new Response(html, {
+    headers: { "Content-Type": "text/html; charset=utf-8", ...CORS_HEADERS }
+  });
+}
+var REMOTE_VERSION = "1.0.0";
+var REMOTE_BODY_TRUNCATE = 2e4;
+var REMOTE_CACHE_CAP = 1e5;
+var REMOTE_MIRROR_CAP = 1e6;
+var REMOTE_MEM_CACHE = /* @__PURE__ */ new Map();
+var REMOTE_MEM_MIRRORS = /* @__PURE__ */ new Map();
+var REMOTE_MEM_INDEX = [];
+function remoteHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = (h << 5) + h + str.charCodeAt(i) | 0;
+  return (h >>> 0).toString(36);
+}
+function remoteTruncate(s, max) {
+  if (!s) return "";
+  return s.length > max ? s.slice(0, max) + "\u2026[truncated]" : s;
+}
+function remoteMemGet(key) {
+  if (key.startsWith("remote:cache:")) return REMOTE_MEM_CACHE.get(key.slice(13)) ?? null;
+  if (key === "remote:mirror:index") return REMOTE_MEM_INDEX.length ? [...REMOTE_MEM_INDEX] : null;
+  if (key.startsWith("remote:mirror:")) return REMOTE_MEM_MIRRORS.get(key.slice(14)) ?? null;
+  return null;
+}
+function remoteMemSet(key, val) {
+  if (key.startsWith("remote:cache:")) REMOTE_MEM_CACHE.set(key.slice(13), val);
+  else if (key === "remote:mirror:index") {
+    REMOTE_MEM_INDEX.length = 0;
+    REMOTE_MEM_INDEX.push(...val);
+  } else if (key.startsWith("remote:mirror:")) REMOTE_MEM_MIRRORS.set(key.slice(14), val);
+}
+async function remoteKvGet(kv, key) {
+  if (!kv) return remoteMemGet(key);
+  try {
+    const v = await kv.get(key, "json") ?? null;
+    return v !== null ? v : remoteMemGet(key);
+  } catch {
+    return remoteMemGet(key);
+  }
+}
+async function remoteKvPut(kv, key, val) {
+  if (!kv) {
+    remoteMemSet(key, val);
+    return;
+  }
+  try {
+    await kv.put(key, JSON.stringify(val));
+  } catch (e) {
+    console.log("EON-Remote: KV write failed, memory fallback \u2014 " + (e && e.message ? e.message : String(e)));
+    remoteMemSet(key, val);
+  }
+}
+async function remoteCacheGet(kv, hash) {
+  return remoteKvGet(kv, "remote:cache:" + hash);
+}
+async function remoteCachePut(kv, hash, entry) {
+  await remoteKvPut(kv, "remote:cache:" + hash, entry);
+}
+async function remoteMirrorPut(kv, record) {
+  await remoteKvPut(kv, "remote:mirror:" + record.ref, record);
+  const records = await remoteKvGet(kv, "remote:mirror:index") || [];
+  const i = records.findIndex((r) => r.ref === record.ref);
+  if (i >= 0) records[i] = record;
+  else records.push(record);
+  await remoteKvPut(kv, "remote:mirror:index", records);
+}
+function remoteIsSafeTarget(raw) {
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  if (host === "metadata.google.internal" || host === "instance-data") return false;
+  if (host === "::1" || host === "[::1]" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe8")) return false;
+  if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.|100\.(6[4-9]|7[0-9]|12[0-7])\.)/.test(host)) return false;
+  if (/^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)) return false;
+  if (/^[0-9]+$/.test(host.replace(/\./g, ""))) return false;
+  return true;
+}
+function remoteJson(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+  });
+}
+async function remoteDoFetch(rawUrl) {
+  const r = await fetch(rawUrl, {
+    headers: {
+      "User-Agent": "EON-Remote/1.0 (sovereign-edge relay)",
+      "Accept": "*/*"
+    },
+    redirect: "follow"
+  });
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  let body = "";
+  try {
+    body = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  } catch {
+    body = String.fromCharCode.apply(null, Array.from(bytes.subarray(0, 4096)));
+  }
+  return { status: r.status, body, contentType: r.headers.get("content-type") || "" };
+}
+async function handleRemoteWebProxy(request, env, url) {
+  const raw = url.searchParams.get("url") || "";
+  if (!raw) return remoteJson({ ok: false, error: "missing url param" }, 400);
+  if (!remoteIsSafeTarget(raw)) return remoteJson({ ok: false, error: "unsafe target" }, 400);
+  const method = (request.method || "GET").toUpperCase();
+  const useMethod = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].indexOf(method) !== -1 ? method : "GET";
+  const useBody = ["POST", "PUT", "PATCH", "DELETE"].indexOf(useMethod) !== -1 ? await request.text() : void 0;
+  try {
+    const r = await fetch(raw, {
+      method: useMethod,
+      body: useBody,
+      headers: {
+        "User-Agent": "EON-WebProxy/1.0 (sovereign-edge relay)",
+        "Accept": "*/*",
+        ...request.headers.get("authorization") ? { "Authorization": request.headers.get("authorization") } : {},
+        ...request.headers.get("x-forwarded-for") ? { "X-Forwarded-For": request.headers.get("x-forwarded-for") } : {},
+        ...useBody && request.headers.get("content-type") ? { "Content-Type": request.headers.get("content-type") } : {}
+      },
+      redirect: "follow"
+    });
+    const h = new Headers();
+    const ct = r.headers.get("content-type");
+    if (ct) h.set("content-type", ct);
+    h.set("x-eon-webproxy", "sovereign-edge");
+    h.set("access-control-allow-origin", "*");
+    return new Response(r.body, { status: r.status, headers: h });
+  } catch (e) {
+    return remoteJson({ ok: false, error: "webproxy failed: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+async function handleRemoteFetch(request, env, url) {
+  const kv = env.CACHE_KV;
+  const raw = url.searchParams.get("url") || "";
+  if (!raw) return remoteJson({ ok: false, error: "missing url param" }, 400);
+  if (!remoteIsSafeTarget(raw)) return remoteJson({ ok: false, error: "unsafe target" }, 400);
+  const hash = remoteHash(raw);
+  const cached = await remoteCacheGet(kv, hash);
+  if (cached && cached.body) {
+    return remoteJson({
+      ok: true,
+      status: cached.status,
+      cached: true,
+      from_cache: true,
+      source: "sovereign-edge",
+      url: raw,
+      fetched_at: cached.fetched_at,
+      body: remoteTruncate(cached.body, REMOTE_BODY_TRUNCATE)
+    });
+  }
+  try {
+    const got = await remoteDoFetch(raw);
+    const entry = {
+      url: raw,
+      status: got.status,
+      body: got.body.slice(0, REMOTE_CACHE_CAP),
+      contentType: got.contentType,
+      fetched_at: Date.now()
+    };
+    await remoteCachePut(kv, hash, entry);
+    return remoteJson({
+      ok: true,
+      status: got.status,
+      cached: false,
+      from_cache: false,
+      source: "sovereign-edge",
+      url: raw,
+      fetched_at: entry.fetched_at,
+      body: remoteTruncate(got.body, REMOTE_BODY_TRUNCATE)
+    });
+  } catch (e) {
+    return remoteJson({ ok: false, error: "fetch failed: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+async function handleRemoteMirror(request, env, url) {
+  const kv = env.CACHE_KV;
+  const raw = url.searchParams.get("url") || "";
+  let ref = url.searchParams.get("ref") || "";
+  if (!raw) return remoteJson({ ok: false, error: "missing url param" }, 400);
+  if (!remoteIsSafeTarget(raw)) return remoteJson({ ok: false, error: "unsafe target" }, 400);
+  if (!ref) ref = "mirror-" + Date.now().toString(36) + "-" + remoteHash(raw);
+  if (!/^[A-Za-z0-9._-]+$/.test(ref)) return remoteJson({ ok: false, error: "ref must match [A-Za-z0-9._-]" }, 400);
+  try {
+    const got = await remoteDoFetch(raw);
+    const body = got.body.slice(0, REMOTE_MIRROR_CAP);
+    const record = {
+      ref,
+      url: raw,
+      fetched_at: Date.now(),
+      size: body.length,
+      status: got.status,
+      contentType: got.contentType,
+      body
+    };
+    await remoteMirrorPut(kv, record);
+    return remoteJson({
+      ok: true,
+      ref,
+      url: raw,
+      size: body.length,
+      stored: true,
+      fetched_at: record.fetched_at,
+      status: got.status
+    });
+  } catch (e) {
+    return remoteJson({ ok: false, error: "mirror failed: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+async function handleRemoteList(request, env, url) {
+  const kv = env.CACHE_KV;
+  const records = await remoteKvGet(kv, "remote:mirror:index") || [];
+  const mirrors = records.map(({ body, ...meta }) => meta);
+  return remoteJson({
+    ok: true,
+    count: mirrors.length,
+    mirrors,
+    storage: kv ? "kv" : "in-memory-map",
+    timestamp: Date.now()
+  });
+}
+async function handleRemoteDiscover(request, env, url) {
+  const kv = env.CACHE_KV;
+  const index = await remoteKvGet(kv, "remote:mirror:index") || [];
+  const out = {
+    ok: true,
+    organ: "eon-remote",
+    version: REMOTE_VERSION,
+    worker: "eon-p2p-cloud",
+    host: url.origin,
+    storage: kv ? "kv" : "in-memory-map",
+    mirrored: index.length,
+    endpoints: [
+      { path: "/api/remote/fetch", method: "GET", params: ["url"], desc: "sovereign fetch of an earthly URL (cached)" },
+      { path: "/api/remote/mirror", method: "GET", params: ["url", "ref"], desc: "snapshot an earthly resource under a named ref" },
+      { path: "/api/remote/list", method: "GET", params: [], desc: "list mirrored resources" },
+      { path: "/api/remote/discover", method: "GET", params: [], desc: "this self-discovery document" }
+    ],
+    timestamp: Date.now()
+  };
+  if (!kv) out.cached_entries = REMOTE_MEM_CACHE.size;
+  return remoteJson(out);
+}
+async function handleRemoteApi(request, env, url) {
+  const path = url.pathname;
+  if (path === "/api/remote/fetch" && request.method === "GET") return handleRemoteFetch(request, env, url);
+  if (path === "/api/remote/mirror" && request.method === "GET") return handleRemoteMirror(request, env, url);
+  if (path === "/api/remote/list" && request.method === "GET") return handleRemoteList(request, env, url);
+  if (path === "/api/remote/discover" && request.method === "GET") return handleRemoteDiscover(request, env, url);
+  if (path === "/api/remote/webproxy") return handleRemoteWebProxy(request, env, url);
+  return remoteJson({ ok: false, error: "unknown remote route: " + path }, 404);
+}
+
+function findBytes(haystack: string, needle: string, start = 0): number {
+  for (let i = start; i <= haystack.length - needle.length; i++) {
+    let match = true;
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) return i;
+  }
+  return -1;
+}
+async function deriveE2EKey(authToken: string): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(authToken),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: enc.encode("eon-e2e-salt-v1"), iterations: 1e5, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+async function e2eDecrypt(key: CryptoKey, payload: string): Promise<string> {
+  const raw = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+  const iv = raw.slice(0, 12);
+  const ciphertext = raw.slice(12);
+  const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return new TextDecoder().decode(plainBuf);
 }

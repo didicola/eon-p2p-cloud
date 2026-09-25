@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import type { Env } from "../types";
 
 interface DreamEntry {
@@ -14,7 +15,7 @@ interface DreamEntry {
   syncedAt?: string;
 }
 
-export class DreamMemoryDO extends DurableObject<Env> {
+export class DreamMemoryDO extends VaultStorageDO<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
   }
@@ -23,20 +24,20 @@ export class DreamMemoryDO extends DurableObject<Env> {
     const id = entry.id || crypto.randomUUID();
     const key = `dream:${id}`;
     const stored = { ...entry, id, syncedAt: new Date().toISOString() };
-    await this.ctx.storage.put(key, stored);
+    await this.encPut(key, stored);
 
-    const index = (await this.ctx.storage.get<string[]>("dream:index")) || [];
+    const index = (await encGet<string[]>(this.ctx.storage, "dream:index")) || [];
     if (!index.includes(id)) {
       index.unshift(id);
       if (index.length > 1000) index.length = 1000;
-      await this.ctx.storage.put("dream:index", index);
+      await this.encPut("dream:index", index);
     }
 
     return { ok: true, id };
   }
 
   async recall(id: string): Promise<DreamEntry | null> {
-    return (await this.ctx.storage.get<DreamEntry>(`dream:${id}`)) || null;
+    return (await encGet<DreamEntry>(this.ctx.storage, `dream:${id}`)) || null;
   }
 
   async list(
@@ -44,12 +45,12 @@ export class DreamMemoryDO extends DurableObject<Env> {
     limit = 50,
     offset = 0,
   ): Promise<{ entries: DreamEntry[]; total: number }> {
-    const index = (await this.ctx.storage.get<string[]>("dream:index")) || [];
+    const index = (await encGet<string[]>(this.ctx.storage, "dream:index")) || [];
     let ids = index;
     if (type) {
       const all = await Promise.all(
         index.map(async (id) => {
-          const entry = await this.ctx.storage.get<DreamEntry>(`dream:${id}`);
+          const entry = await encGet<DreamEntry>(this.ctx.storage, `dream:${id}`);
           return entry && entry.type === type ? entry : null;
         }),
       );
@@ -59,7 +60,7 @@ export class DreamMemoryDO extends DurableObject<Env> {
     const page = ids.slice(offset, offset + limit);
     const entries = (
       await Promise.all(
-        page.map(async (id) => this.ctx.storage.get<DreamEntry>(`dream:${id}`)),
+        page.map(async (id) => encGet<DreamEntry>(this.ctx.storage, `dream:${id}`)),
       )
     ).filter((e): e is DreamEntry => e !== null);
     return { entries, total };
@@ -67,18 +68,18 @@ export class DreamMemoryDO extends DurableObject<Env> {
 
   async delete(id: string): Promise<{ ok: boolean }> {
     await this.ctx.storage.delete(`dream:${id}`);
-    const index = (await this.ctx.storage.get<string[]>("dream:index")) || [];
+    const index = (await encGet<string[]>(this.ctx.storage, "dream:index")) || [];
     const filtered = index.filter((i) => i !== id);
-    await this.ctx.storage.put("dream:index", filtered);
+    await this.encPut("dream:index", filtered);
     return { ok: true };
   }
 
   async stats(): Promise<{ total: number; byType: Record<string, number> }> {
-    const index = (await this.ctx.storage.get<string[]>("dream:index")) || [];
+    const index = (await encGet<string[]>(this.ctx.storage, "dream:index")) || [];
     const entries = (
       await Promise.all(
         index.map(async (id) =>
-          this.ctx.storage.get<DreamEntry>(`dream:${id}`),
+          encGet<DreamEntry>(this.ctx.storage, `dream:${id}`),
         ),
       )
     ).filter((e): e is DreamEntry => e !== null);

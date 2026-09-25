@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import { type Env, type Task } from "../types";
 import { FREE_PROVIDERS, getModelFamily, parseReply } from "../models";
 
@@ -15,7 +16,7 @@ import { FREE_PROVIDERS, getModelFamily, parseReply } from "../models";
  *     flag), so alarm() is safe across colo restarts.
  *   - Adaptive alarm interval: 3 s when busy (claimed a task), 10 s when idle.
  */
-export class CloudP2PAgentDO extends DurableObject<Env> {
+export class CloudP2PAgentDO extends VaultStorageDO<Env> {
   private peerId: string;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -32,11 +33,11 @@ export class CloudP2PAgentDO extends DurableObject<Env> {
    * alarm so the agent starts processing tasks.
    */
   async initialize(): Promise<void> {
-    const initialized = await this.ctx.storage.get<boolean>("initialized");
+    const initialized = await encGet<boolean>(this.ctx.storage, "initialized");
     if (initialized) return;
 
     await this.announce();
-    await this.ctx.storage.put("initialized", true);
+    await this.encPut("initialized", true);
 
     const nextAlarm = await this.ctx.storage.getAlarm();
     if (nextAlarm === null || nextAlarm === undefined) {
@@ -145,7 +146,7 @@ export class CloudP2PAgentDO extends DurableObject<Env> {
     // cycle is already running.
     const lockKey = "processing_lock";
     const now = Date.now();
-    const lockTs = await this.ctx.storage.get<number>(lockKey);
+    const lockTs = await encGet<number>(this.ctx.storage, lockKey);
 
     if (lockTs && now - lockTs < 30_000) {
       // Lock is still held — skip this alarm tick
@@ -153,7 +154,7 @@ export class CloudP2PAgentDO extends DurableObject<Env> {
       return;
     }
 
-    await this.ctx.storage.put(lockKey, now);
+    await this.encPut(lockKey, now);
 
     let hadWork = false;
     try {

@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import { type PeerCapability, type Task, type Env } from "../types";
 import { SWARM_SHARDS, getModelFamily } from "../models";
 
@@ -15,7 +16,7 @@ import { SWARM_SHARDS, getModelFamily } from "../models";
  *   - Heartbeat-based eviction (5 min stale expiry)
  *   - All durable state through ctx.storage
  */
-export class P2PSwarmDO extends DurableObject<Env> {
+export class P2PSwarmDO extends VaultStorageDO<Env> {
   private capabilities = new Map<string, PeerCapability>();
   private taskQueue: Task[] = [];
   private connections = new Map<string, WebSocket>();
@@ -146,7 +147,7 @@ export class P2PSwarmDO extends DurableObject<Env> {
   }
 
   private async persistCapability(cap: PeerCapability): Promise<void> {
-    await this.ctx.storage.put(`cap:${cap.peerId}`, cap);
+    await this.encPut(`cap:${cap.peerId}`, cap);
   }
 
   // ---------------------------------------------------------------------------
@@ -177,7 +178,7 @@ export class P2PSwarmDO extends DurableObject<Env> {
     };
 
     this.taskQueue.push(task);
-    await this.ctx.storage.put<Task>(`task:${task.id}`, task);
+    await this.encPut(`task:${task.id}`, task);
     this.broadcastToPeers({
       type: "new_task",
       taskId: task.id,
@@ -191,7 +192,7 @@ export class P2PSwarmDO extends DurableObject<Env> {
   async claimTask(peerId: string): Promise<Task | null> {
     // Restore from storage if in-memory queue is empty
     if (this.taskQueue.length === 0) {
-      const stored = await this.ctx.storage.list<Task>({ prefix: "task:" });
+      const stored = await encList<Task>(this.ctx.storage, { prefix: "task:" });
       if (stored) {
         for (const [, val] of stored) {
           if (
@@ -212,7 +213,7 @@ export class P2PSwarmDO extends DurableObject<Env> {
     if (task) {
       task.claimed = peerId;
       task.attempts++;
-      await this.ctx.storage.put(`task:${task.id}`, task);
+      await this.encPut(`task:${task.id}`, task);
       return task;
     }
 
@@ -222,7 +223,7 @@ export class P2PSwarmDO extends DurableObject<Env> {
   async submitResult(taskId: string, result: string): Promise<boolean> {
     let task = this.taskQueue.find((t) => t.id === taskId);
     if (!task) {
-      task = (await this.ctx.storage.get<Task>(`task:${taskId}`)) ?? null;
+      task = (await encGet<Task>(this.ctx.storage, `task:${taskId}`)) ?? null;
     }
     if (task) {
       task.result = result;
@@ -230,7 +231,7 @@ export class P2PSwarmDO extends DurableObject<Env> {
       if (!this.taskQueue.find((t) => t.id === taskId)) {
         this.taskQueue.push(task);
       }
-      await this.ctx.storage.put(`task:${task.id}`, task);
+      await this.encPut(`task:${task.id}`, task);
       this.broadcastToPeers({ type: "task_done", taskId });
       return true;
     }
@@ -240,7 +241,7 @@ export class P2PSwarmDO extends DurableObject<Env> {
   async getTaskResult(taskId: string): Promise<Task | null> {
     const inMem = this.taskQueue.find((t) => t.id === taskId);
     if (inMem) return inMem;
-    return (await this.ctx.storage.get<Task>(`task:${taskId}`)) ?? null;
+    return (await encGet<Task>(this.ctx.storage, `task:${taskId}`)) ?? null;
   }
 
   private sortQueueByPriority(): void {
@@ -279,7 +280,7 @@ export class P2PSwarmDO extends DurableObject<Env> {
             cap.lastHeartbeat = Date.now();
             cap.currentLoad = data.load ?? cap.currentLoad;
             cap.avgLatency = data.latency ?? cap.avgLatency;
-            await this.ctx.storage.put(`cap:${peerId}`, cap);
+            await this.encPut(`cap:${peerId}`, cap);
           }
         }
       } catch {
@@ -304,11 +305,11 @@ export class P2PSwarmDO extends DurableObject<Env> {
   // ---------------------------------------------------------------------------
 
   async getStorage(key: string): Promise<unknown> {
-    return this.ctx.storage.get(key);
+    return this.encGet(key);
   }
 
   async listStorage(prefix: string) {
-    return this.ctx.storage.list<any>({ prefix });
+    return encList<any>(this.ctx.storage, { prefix });
   }
 
   // ---------------------------------------------------------------------------

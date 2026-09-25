@@ -3,6 +3,7 @@
 // Learns from: chat completions, agent dispatches, P2P task results, dream memories
 // Produces: new skills, upgrade proposals, model route improvements, insights
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 
 interface DreamEntry {
   id: string;
@@ -37,15 +38,15 @@ const REFLECTION_PROMPTS = [
   "What earthly dependency is this system most vulnerable to? How could it be eliminated?",
 ];
 
-export class DreamEngineDO extends DurableObject<Env> {
+export class DreamEngineDO extends VaultStorageDO<Env> {
   private dreams: DreamEntry[] = [];
   private upgrades: UpgradeProposal[] = [];
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      this.dreams = (await ctx.storage.get<DreamEntry[]>("dreams")) || [];
-      this.upgrades = (await ctx.storage.get<UpgradeProposal[]>("upgrades")) || [];
+      this.dreams = (await encGet<DreamEntry[]>(this.ctx.storage, "dreams")) || [];
+      this.upgrades = (await encGet<UpgradeProposal[]>(this.ctx.storage, "upgrades")) || [];
     });
   }
 
@@ -127,8 +128,8 @@ ${prompt}`;
     }
 
     // Persist
-    await this.ctx.storage.put("dreams", this.dreams);
-    await this.ctx.storage.put("upgrades", this.upgrades);
+    await this.encPut("dreams", this.dreams);
+    await this.encPut("upgrades", this.upgrades);
 
     // Auto-apply high-priority upgrades (priority <= 2)
     const autoApplied = this.upgrades.filter(u => u.status === "pending" && u.priority <= 2);
@@ -137,7 +138,7 @@ ${prompt}`;
       u.applied = true;
     }
     if (autoApplied.length > 0) {
-      await this.ctx.storage.put("upgrades", this.upgrades);
+      await this.encPut("upgrades", this.upgrades);
     }
 
     return { dreams: newDreams, upgrades: newUpgrades + autoApplied.length };

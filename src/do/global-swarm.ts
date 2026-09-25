@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import { type Env, type RegionMetrics, type Task } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -31,7 +32,7 @@ const REGION_NAMES = ["na", "eu", "asia", "sa", "af", "oc"];
  *
  * This DO is a singleton — only one instance should ever be created.
  */
-export class GlobalSwarmDO extends DurableObject<Env> {
+export class GlobalSwarmDO extends VaultStorageDO<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
   }
@@ -61,7 +62,7 @@ export class GlobalSwarmDO extends DurableObject<Env> {
           snapshots[region] = metrics;
 
           // Persist the snapshot for crash recovery
-          await this.ctx.storage.put(
+          await this.encPut(
             snapshotKey(region),
             {
               region,
@@ -94,12 +95,12 @@ export class GlobalSwarmDO extends DurableObject<Env> {
     const result: Record<string, RegionMetrics> = {};
 
     if (region) {
-      const snap = await this.ctx.storage.get<RegionSnapshot>(
+      const snap = await this.encGet<RegionSnapshot>(
         snapshotKey(region),
       );
       if (snap) result[region] = snap.metrics;
     } else {
-      const stored = await this.ctx.storage.list<RegionSnapshot>({
+      const stored = await this.encList<RegionSnapshot>({
         prefix: "snapshot:",
       });
       for (const [, snap] of stored) {
@@ -212,7 +213,7 @@ export class GlobalSwarmDO extends DurableObject<Env> {
         migratedAt: Date.now(),
         success: true,
       };
-      await this.ctx.storage.put(migrationKey(taskId), record);
+      await this.encPut(migrationKey(taskId), record);
 
       return true;
     } catch (e) {
@@ -231,7 +232,7 @@ export class GlobalSwarmDO extends DurableObject<Env> {
     taskId: string,
   ): Promise<MigrationRecord | null> {
     return (
-      (await this.ctx.storage.get<MigrationRecord>(
+      (await this.encGet<MigrationRecord>(
         migrationKey(taskId),
       )) ?? null
     );

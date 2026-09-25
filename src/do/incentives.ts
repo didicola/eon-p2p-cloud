@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import { type Env, type CreditEntry } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -18,7 +19,7 @@ const MAX_REDEMPTIONS_PER_WINDOW = 3;
  *   - Redemption is limited to MAX_REDEMPTIONS_PER_WINDOW per sliding 24 h
  *     window.
  */
-export class IncentiveDO extends DurableObject<Env> {
+export class IncentiveDO extends VaultStorageDO<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
   }
@@ -50,13 +51,13 @@ export class IncentiveDO extends DurableObject<Env> {
     // Append to the peer's credit ledger
     const ledger = await this.getLedger(peerId);
     ledger.push(entry);
-    await this.ctx.storage.put(ledgerKey(peerId), ledger);
+    await this.encPut(ledgerKey(peerId), ledger);
 
     // Update aggregate balance
     const balance = await this.getBalance(peerId);
     balance.earned += entry.amount;
     balance.net += entry.amount;
-    await this.ctx.storage.put(balanceKey(peerId), balance);
+    await this.encPut(balanceKey(peerId), balance);
 
     return entry;
   }
@@ -65,7 +66,7 @@ export class IncentiveDO extends DurableObject<Env> {
    * Get the current balance for a peer.
    */
   async getBalance(peerId: string): Promise<PeerBalance> {
-    const stored = await this.ctx.storage.get<PeerBalance>(
+    const stored = await this.encGet<PeerBalance>(
       balanceKey(peerId),
     );
     if (stored) return stored;
@@ -118,12 +119,12 @@ export class IncentiveDO extends DurableObject<Env> {
 
     // Record the redemption
     redemptions.push(Date.now());
-    await this.ctx.storage.put(redemptionKey(peerId), redemptions);
+    await this.encPut(redemptionKey(peerId), redemptions);
 
     balance.redeemed += amount;
     balance.net -= amount;
     balance.lastRedemption = Date.now();
-    await this.ctx.storage.put(balanceKey(peerId), balance);
+    await this.encPut(balanceKey(peerId), balance);
 
     return { ok: true, reason: "payout_initiated", amount };
   }
@@ -132,7 +133,7 @@ export class IncentiveDO extends DurableObject<Env> {
    * Get the full credit ledger for a peer.
    */
   async getLedger(peerId: string): Promise<CreditEntry[]> {
-    return (await this.ctx.storage.get<CreditEntry[]>(ledgerKey(peerId))) ?? [];
+    return (await encGet<CreditEntry[]>(this.ctx.storage, ledgerKey(peerId))) ?? [];
   }
 
   // -----------------------------------------------------------------------
@@ -151,7 +152,7 @@ export class IncentiveDO extends DurableObject<Env> {
     peerId: string,
   ): Promise<number[]> {
     return (
-      (await this.ctx.storage.get<number[]>(redemptionKey(peerId))) ?? []
+      (await encGet<number[]>(this.ctx.storage, redemptionKey(peerId))) ?? []
     );
   }
 

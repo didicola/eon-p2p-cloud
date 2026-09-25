@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import { type Env, type PeerCapability, type RegionMetrics, type Task } from "../types";
 
 /**
@@ -8,7 +9,7 @@ import { type Env, type PeerCapability, type RegionMetrics, type Task } from "..
  * "af", "oc").  Maintains a full capability registry for all peers in that
  * region and provides latency-optimised task routing within the region.
  */
-export class RegionalSwarmDO extends DurableObject<Env> {
+export class RegionalSwarmDO extends VaultStorageDO<Env> {
   /** In-memory cache — reloaded from storage on first access. */
   private peers = new Map<string, PeerCapability>();
   private taskQueue: Task[] = [];
@@ -33,7 +34,7 @@ export class RegionalSwarmDO extends DurableObject<Env> {
     cap.lastHeartbeat = Date.now();
     cap.region = this.regionName;
     this.peers.set(cap.peerId, cap);
-    await this.ctx.storage.put(peerKey(cap.peerId), cap);
+    await this.encPut(peerKey(cap.peerId), cap);
   }
 
   /**
@@ -104,7 +105,7 @@ export class RegionalSwarmDO extends DurableObject<Env> {
     };
 
     this.taskQueue.push(task);
-    await this.ctx.storage.put(`regtask:${task.id}`, task);
+    await this.encPut(`regtask:${task.id}`, task);
     return task.id;
   }
 
@@ -114,7 +115,7 @@ export class RegionalSwarmDO extends DurableObject<Env> {
   async claimTask(peerId: string): Promise<Task | null> {
     if (this.taskQueue.length === 0) {
       // Rehydrate from storage
-      const stored = await this.ctx.storage.list<Task>({
+      const stored = await this.encList<Task>({
         prefix: "regtask:",
       });
       for (const [, t] of stored) {
@@ -128,7 +129,7 @@ export class RegionalSwarmDO extends DurableObject<Env> {
     if (task) {
       task.claimed = peerId;
       task.attempts++;
-      await this.ctx.storage.put(`regtask:${task.id}`, task);
+      await this.encPut(`regtask:${task.id}`, task);
       return task;
     }
     return null;
@@ -140,12 +141,12 @@ export class RegionalSwarmDO extends DurableObject<Env> {
   async submitResult(taskId: string, result: string): Promise<boolean> {
     const task =
       this.taskQueue.find((t) => t.id === taskId) ??
-      (await this.ctx.storage.get<Task>(`regtask:${taskId}`));
+      (await encGet<Task>(this.ctx.storage, `regtask:${taskId}`));
 
     if (task) {
       task.result = result;
       task.done = true;
-      await this.ctx.storage.put(`regtask:${task.id}`, task);
+      await this.encPut(`regtask:${task.id}`, task);
       return true;
     }
     return false;
@@ -192,7 +193,7 @@ export class RegionalSwarmDO extends DurableObject<Env> {
 
   private async rehydrateIfEmpty(): Promise<void> {
     if (this.peers.size > 0) return;
-    const stored = await this.ctx.storage.list<PeerCapability>({
+    const stored = await this.encList<PeerCapability>({
       prefix: "regpeer:",
     });
     for (const [key, cap] of stored) {

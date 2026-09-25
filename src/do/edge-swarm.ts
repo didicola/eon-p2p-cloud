@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VaultStorageDO } from "./vault-storage";
 import { type Env, type PeerCapability } from "../types";
 
 /**
@@ -14,7 +15,7 @@ import { type Env, type PeerCapability } from "../types";
  *     inside the requested colo, falling back to any peer in the same colo
  *     if no model match.
  */
-export class EdgeSwarmDO extends DurableObject<Env> {
+export class EdgeSwarmDO extends VaultStorageDO<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
   }
@@ -48,7 +49,7 @@ export class EdgeSwarmDO extends DurableObject<Env> {
       endpoint: capabilities.endpoint,
     };
 
-    await this.ctx.storage.put(edgePeerKey(peerId), peer);
+    await this.encPut(edgePeerKey(peerId), peer);
   }
 
   /**
@@ -62,7 +63,7 @@ export class EdgeSwarmDO extends DurableObject<Env> {
    * Get every peer registered in this colo.
    */
   async getLocalPeers(): Promise<PeerCapability[]> {
-    const stored = await this.ctx.storage.list<PeerCapability>({
+    const stored = await this.encList<PeerCapability>({
       prefix: "edgepeer:",
     });
     return Array.from(stored.values());
@@ -123,14 +124,14 @@ export class EdgeSwarmDO extends DurableObject<Env> {
     latency?: number,
   ): Promise<void> {
     const key = edgePeerKey(peerId);
-    const peer = await this.ctx.storage.get<PeerCapability>(key);
+    const peer = await encGet<PeerCapability>(this.ctx.storage, key);
     if (!peer) return;
 
     peer.lastHeartbeat = Date.now();
     if (load !== undefined) peer.currentLoad = load;
     if (latency !== undefined) peer.avgLatency = latency;
 
-    await this.ctx.storage.put(key, peer);
+    await this.encPut(key, peer);
   }
 
   // -----------------------------------------------------------------------
