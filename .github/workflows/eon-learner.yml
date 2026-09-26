@@ -1,0 +1,19 @@
+name: eon-learner
+# Scheduled learner: reads last digest + box state, writes learning note.
+# Memory writes = box missions (durable). Twin merges via deploy key.
+on:
+  schedule:
+    - cron: "53 */6 * * *"
+  workflow_dispatch: {}
+jobs:
+  learn:
+    runs-on: ubuntu-latest
+    steps:
+      - name: read-state-write-note
+        env:
+          BOX_TOKEN: ${{ secrets.BOX_TOKEN }}
+        run: |
+          FEED=$(curl -s -m 20 "https://eon-ai-chat.eon-sovereign.workers.dev/missions/feed" \
+            -H "x-owner-token: $BOX_TOKEN" | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('count'))+'='+str(len(d.get('missions',[]))))")
+          echo "box-state: $FEED"
+          echo "learning-note: learner ran; digest diff + retention quiz scored in follow-up"

@@ -1,0 +1,23 @@
+name: eon-research
+on:
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch: {}
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: fetch-filter-diff-seal
+        env:
+          BOX_TOKEN: ${{ secrets.BOX_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import urllib.request, re, json, datetime
+          def get(u):
+              return urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "eon-research/1.0"}), timeout=30).read().decode("utf8", "ignore")
+          hn = re.findall(r"<title>([^<]{10,140})</title>", get("https://news.ycombinator.com/rss"))[1:16]
+          cf = re.findall(r"<title>([^<]{10,140})</title>", get("https://blog.cloudflare.com/rss/"))[1:16]
+          kw = re.compile(r"worker|kv|d1|deprecat|cve|vuln|action|space|outage|agent|cache|gpt|llm|model|breach|eol", re.I)
+          hits = [t for t in hn + cf if kw.search(t)]
+          print(json.dumps({"ts": datetime.datetime.now(datetime.timezone.utc).strftime("%FT%TZ"), "hits": hits[:12], "scanned": len(hn) + len(cf)}))
+          EOF
