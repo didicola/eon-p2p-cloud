@@ -1,0 +1,24 @@
+name: triposr-cpu
+# FOREIGN execution: TripoSR image-to-3D on GH CPU. May OOM/fail — receipt either way.
+on:
+  workflow_dispatch:
+    inputs:
+      image_url:
+        default: "https://raw.githubusercontent.com/didicola/eon-p2p-cloud/master/eon-3d/eon-tex.png"
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu -q 2>&1 | tail -1
+          git clone --depth=1 https://github.com/VAST-AI-Research/TripoSR.git tsr 2>&1 | tail -1
+          cd tsr && pip install -q -r requirements.txt 2>&1 | tail -1
+          curl -s -m 60 -o in.png "${{ inputs.image_url }}" && ls -l in.png
+          timeout 2400 python run.py in.png --output-dir out/ 2>&1 | tail -5
+          ls -l out/ 2>&1 | head -5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: triposr-out
+          path: tsr/out/
