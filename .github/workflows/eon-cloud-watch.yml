@@ -1,0 +1,25 @@
+name: eon-cloud-watch
+# External fleet watch: 30-min probes of keeper/fleet/bus from GitHub iron.
+# Results sealed to box (needs BOX_TOKEN secret). Failures = red X (owner checks tab).
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: probe trio + seal
+        env:
+          BOX_TOKEN: ${{ secrets.BOX_TOKEN }}
+        run: |
+          set -uo pipefail; fail=0
+          K=$(curl -s -m 15 "https://eon-matrix-keeper.eon-sovereign.workers.dev/status" | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('lastTick'))+'/'+str(len(d.get('claims',[]))))" 2>/dev/null || echo "ERR")
+          echo "keeper: $K"; [ "$K" = "ERR" ] && fail=1
+          B=$(curl -s -m 15 "https://eon-ai-chat.eon-sovereign.workers.dev/missions/feed" | python3 -c "import json,sys; d=json.load(sys.stdin); print(str(d.get('count'))+'='+str(len(d.get('missions',[]))))" 2>/dev/null || echo "ERR")
+          echo "box: $B"; [ "$B" = "ERR" ] && fail=1
+          MID=$(curl -s -m 15 -X POST "https://eon-ai-chat.eon-sovereign.workers.dev/missions/new?task=CLOUD-WATCH-$(date -u +%FT%TZ)&skill=e2e" -H "x-owner-token: $BOX_TOKEN" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+          [ -z "$MID" ] && fail=1
+          echo "sealed: $MID fail=$fail"
+          exit $fail
