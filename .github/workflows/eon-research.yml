@@ -19,5 +19,17 @@ jobs:
           cf = re.findall(r"<title>([^<]{10,140})</title>", get("https://blog.cloudflare.com/rss/"))[1:16]
           kw = re.compile(r"worker|kv|d1|deprecat|cve|vuln|action|space|outage|agent|cache|gpt|llm|model|breach|eol", re.I)
           hits = [t for t in hn + cf if kw.search(t)]
-          print(json.dumps({"ts": datetime.datetime.now(datetime.timezone.utc).strftime("%FT%TZ"), "hits": hits[:12], "scanned": len(hn) + len(cf)}))
+          digest = json.dumps({"ts": datetime.datetime.now(datetime.timezone.utc).strftime("%FT%TZ"), "hits": hits[:12], "scanned": len(hn) + len(cf)})
+          print(digest)
+          open("/tmp/digest.json", "w").write(digest)
           EOF
+      - name: seal-digest-to-box
+        env:
+          BOX_TOKEN: ${{ secrets.BOX_TOKEN }}
+        run: |
+          P=$(python3 -c "import json; d=open('/tmp/digest.json').read(); print(json.dumps({'research_digest': d}))")
+          MID=$(curl -s -m 15 -X POST "https://eon-ai-chat.eon-sovereign.workers.dev/missions/new?task=RESEARCH-DIGEST-$(date -u +%FT%TZ)&skill=e2e" -H "x-owner-token: $BOX_TOKEN" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))")
+          [ -z "$MID" ] && exit 1
+          curl -s -m 12 -X POST "https://eon-ai-chat.eon-sovereign.workers.dev/missions/accept?id=$MID&agent=e2e-limb" >/dev/null
+          PSHA=$(printf '%s' "$P" | sha256sum | cut -d' ' -f1)
+          printf '%s' "$P" | curl -s -m 25 -X POST "https://eon-ai-chat.eon-sovereign.workers.dev/missions/deliver?id=$MID" -H "x-eon-lane: e2e-research" -H "x-content-sha256: $PSHA" --data-binary @- | python3 -c "import json,sys; print(json.load(sys.stdin).get('status','?'))"
