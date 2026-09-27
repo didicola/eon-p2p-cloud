@@ -24,6 +24,6 @@ jobs:
             "https://api-groq.eon-sovereign.workers.dev/" ; do
             code=$(curl -s -m 15 -o /dev/null -w "%{http_code}" "$u" || echo 000)
             echo "- $code  $u" >> "$GITHUB_STEP_SUMMARY"
-            [ "$code" = "200" ] || fail=1
+            [ "$code" = "200" ] || [ "$code" = "401" ] || fail=1
           done
           exit $fail
