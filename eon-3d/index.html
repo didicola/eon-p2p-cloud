@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>EON-3D v1</title>
+<style>html,body{margin:0;height:100%;background:#0b0d12;overflow:hidden}#hud{position:fixed;top:8px;left:10px;color:#7fd7ff;font:12px monospace}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head><body><div id="hud">EON-3D v1 · drag orbit · wheel zoom</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0d12);
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(4, 3, 7);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.autoRotate = true; controls.autoRotateSpeed = 1.2;
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const sun = new THREE.DirectionalLight(0xffffff, 2); sun.position.set(5, 10, 7); scene.add(sun);
+const tex = new THREE.TextureLoader().load('eon-tex.png');
+const cube = new THREE.Mesh(new THREE.BoxGeometry(2,2,2), new THREE.MeshStandardMaterial({map:tex, roughness:0.35, metalness:0.6}));
+cube.position.y = 1.4; scene.add(cube);
+const knot = new THREE.Mesh(new THREE.TorusKnotGeometry(0.55, 0.18, 128, 24), new THREE.MeshStandardMaterial({color:0x7fd7ff, roughness:0.2, metalness:0.9}));
+knot.position.set(2.6, 2.6, 0); scene.add(knot);
+const plane = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({color:0x11141c, roughness:0.9}));
+plane.rotation.x = -Math.PI/2; scene.add(plane);
+(function tick(){ requestAnimationFrame(tick); knot.rotation.x += 0.008; knot.rotation.y += 0.011; cube.rotation.y += 0.003; controls.update(); renderer.render(scene, camera); })();
+addEventListener('resize', () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script></body></html>
