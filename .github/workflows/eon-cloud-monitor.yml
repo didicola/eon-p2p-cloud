@@ -37,4 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - run: echo "FULL-HUNT: anomaly path — claim diffs, temps detail, diary tail (manual trigger or anomaly only)"
+      - name: full-hunt-note
+        run: |
+          echo "FULL-HUNT anomaly path: claim diffs, temps detail, diary tail"
