@@ -1,0 +1,48 @@
+name: drive-sync
+# Mirrors box decision digests + status into the shared Drive folder.
+# ACTIVATION: owner sets repo secret RCLONE_GDRIVE_TOKEN (rclone Drive token JSON).
+# Without the secret this workflow exits 0 silently (no failure noise).
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check secret present
+        id: gate
+        run: |
+          if [ -z "${{ secrets.RCLONE_GDRIVE_TOKEN }}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "Drive secret absent — parked, exiting clean."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install rclone
+        if: steps.gate.outputs.present == 'true'
+        run: sudo -v || true; curl -s https://rclone.org/install.sh | sudo bash
+      - name: Configure Drive remote from secret
+        if: steps.gate.outputs.present == 'true'
+        run: |
+          mkdir -p ~/.config/rclone
+          python3 - <<'EOF'
+          import json, os
+          tok = json.loads(os.environ["RCLONE_GDRIVE_TOKEN"])
+          cfg = "[gdrive]\ntype = drive\nscope = drive.file\ntoken = %s\n" % json.dumps(tok)
+          open(os.path.expanduser("~/.config/rclone/rclone.conf"), "w").write(cfg)
+          print("rclone.conf written")
+          EOF
+        env:
+          RCLONE_GDRIVE_TOKEN: ${{ secrets.RCLONE_GDRIVE_TOKEN }}
+      - name: Fetch box digest + write status
+        if: steps.gate.outputs.present == 'true'
+        run: |
+          BOX="https://eon-ai-chat.eon-sovereign.workers.dev"
+          curl -s -m 30 "$BOX/bus/tail?n=5" | head -c 2000 > box-tail.json || echo '{}' > box-tail.json
+          printf 'drive-sync %s\nbox-tail bytes: %s\nsecret: present (runner)\n' "$(date -u +%FT%TZ)" "$(wc -c < box-tail.json)" > sync-status.txt
+          rclone copyto sync-status.txt --drive-root-folder-id "1qW8dXKCF-dllCkezKAHfjufObmzHXJEn" "gdrive:heartbeats/gh-sync.txt" 2>&1 | tail -2
+          rclone copyto box-tail.json --drive-root-folder-id "1qW8dXKCF-dllCkezKAHfjufObmzHXJEn" "gdrive:artifacts/box-tail.json" 2>&1 | tail -2
