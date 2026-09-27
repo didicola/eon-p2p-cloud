@@ -1,0 +1,32 @@
+name: eon-cloud-watch
+# External fleet monitor: workers.dev is unreachable from inside a worker, so the
+# FLEET is watched from here. Alerts via the worker own stored TG secret (no repo
+# secrets needed). Works with all locals powered off.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe fleet
+        run: |
+          fail=0
+          for u in \
+            "https://eon-p2p-cloud.eon-sovereign.workers.dev/" \
+            "https://eon-p2p-cloud.eon-sovereign.workers.dev/watchdog/test" \
+            "https://eon-matrix-keeper.eon-sovereign.workers.dev/status" \
+            "https://api-openai.eon-sovereign.workers.dev/" \
+            "https://api-openrouter.eon-sovereign.workers.dev/" ; do
+            code=$(curl -s -m 20 -o /dev/null -w "%{http_code}" "$u" || echo 000)
+            echo "$u -> $code"
+            [ "$code" = 200 ] || fail=1
+          done
+          [ "$fail" = 0 ] && echo ALL_OK || { echo FLEET_FAIL; exit 1; }
+      - name: alert on failure
+        if: failure()
+        run: |
+          curl -s -m 20 -X POST -H "Content-Type: application/json" \
+            -d "{\"text\":\"GH cloud-watch: fleet probe FAILED. All locals may be off - cloud saw it.\"}" \
+            https://eon-p2p-cloud.eon-sovereign.workers.dev/tg/send | head -c 200
