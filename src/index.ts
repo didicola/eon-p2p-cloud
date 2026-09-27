@@ -1658,6 +1658,19 @@ export default {
         }
       }
 
+      // GET /watchdog/test — run watchdog checks on demand (?prove=1 sends TG self-test)
+      if (url.pathname === "/watchdog/test" && method === "GET") {
+        const out = await runWatchdog(env, false);
+        let prove: unknown = null;
+        if (url.searchParams.get("prove") === "1") {
+          const sent = await tgSend(env, WATCHDOG_CHAT, `watchdog self-test OK (${out.checks.length} checks, ${out.failed.length} failed) ${new Date().toISOString()}`);
+          prove = { sent };
+        }
+        return new Response(JSON.stringify({ ...out, prove }), {
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        });
+      }
+
       // GET /sync/config — retrieve config from cloud
       if (url.pathname === "/sync/config" && method === "GET") {
         const type = url.searchParams.get("type") || "";
@@ -2492,6 +2505,13 @@ export default {
         console.error("Dream engine cycle failed:", e);
         await log(env, ctx, "warn", "dream_cycle_failed", { error: String(e) });
       }
+    // ── Watchdog: daily health checks + TG auto-alert + twin parking ──
+    try {
+      const wd = await runWatchdog(env, true);
+      await log(env, ctx, wd.ok ? "info" : "warn", "watchdog_run", wd);
+    } catch (e) {
+      console.error("Watchdog failed:", e);
+    }
     } catch (e) {
       console.error("Scheduled handler error:", e);
       await log(env, ctx, "error", "scheduled_handler_error", {
@@ -2503,6 +2523,64 @@ export default {
 };
 
 // -----------------------------------------------------------------------------
+// ── EON watchdog v1: daily-cron health checks + TG auto-alert + twin parking ──
+// NOTE: *.workers.dev is NOT fetchable from inside a worker (edge blind spot).
+// Fleet content is watched by the external GH workflow; here we watch EGRESS.
+const WATCHDOG_CHAT = "6663994526";
+const WATCHDOG_CHECKS: Array<{ name: string; url: string; expect?: number | number[] }> = [
+  { name: "telegram-api", url: "https://api.telegram.org/bot000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/getMe", expect: [401, 403, 404] },
+  { name: "github-api", url: "https://api.github.com/zen", expect: [200] },
+  { name: "egress", url: "https://example.com/", expect: [200] },
+];
+async function tgSend(env: any, chat: string, text: string): Promise<boolean> {
+  try {
+    const token = (env as any).TELEGRAM_BOT_TOKEN || "";
+    if (!token) return false;
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chat, text: text.slice(0, 3500) }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+async function runWatchdog(env: any, alert: boolean): Promise<{ ok: boolean; checks: Array<{ name: string; code: number | string; ms: number }>; failed: string[]; tg: boolean; parked: string[] }> {
+  const checks: Array<{ name: string; code: number | string; ms: number }> = [];
+  for (let i = 0; i < WATCHDOG_CHECKS.length; i++) {
+    const c = WATCHDOG_CHECKS[i];
+    const t0 = Date.now();
+    try {
+      const r = await fetch(c.url, { signal: AbortSignal.timeout(10000), headers: { "User-Agent": "eon-watchdog/1.0", "Accept": "*/*" } });
+      checks.push({ name: c.name, code: r.status, ms: Date.now() - t0 });
+    } catch (e) {
+      checks.push({ name: c.name, code: "ERR:" + String(e).slice(0, 60), ms: Date.now() - t0 });
+    }
+  }
+  const failed = checks.filter((c, i) => {
+    const e = WATCHDOG_CHECKS[i].expect ?? 200;
+    const exp = Array.isArray(e) ? e : [e];
+    return !exp.includes(c.code as number);
+  }).map((c) => c.name);
+  let tg = false;
+  const parked: string[] = [];
+  if (failed.length && alert) {
+    tg = await tgSend(env, WATCHDOG_CHAT, `EON watchdog FAIL [${failed.join(",")}] ${new Date().toISOString()} (cloud saw it; locals may be off)`);
+    try {
+      const doId = (env as any).DREAM_MEMORY.idFromName("delegation-queue");
+      const stub = (env as any).DREAM_MEMORY.get(doId);
+      const taskId = `watchdog-${Date.now()}`;
+      await stub.fetch("http://internal/store", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "delegation", id: taskId, title: `[watchdog] failures: ${failed.join(",")}`, description: JSON.stringify({ target: "twin", action: "watchdog-failures", params: { failed, checks } }), priority: 2, source: "cloud-watchdog", created: new Date().toISOString() }),
+      });
+      parked.push(taskId);
+    } catch { /* parking best-effort */ }
+  }
+  return { ok: failed.length === 0, checks, failed, tg, parked };
+}
+
 // Utility: hash messages for cache key
 // -----------------------------------------------------------------------------
 function hashMessages(
