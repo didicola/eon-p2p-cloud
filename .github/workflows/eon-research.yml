@@ -30,7 +30,7 @@ jobs:
           P=$(python3 -c "import json; d=open('/tmp/digest.json').read(); print(json.dumps({'research_digest': d}))")
           MID_RAW=$(curl -s -m 15 -w "\nCODE:%{http_code}" -X POST "https://eon-ai-chat.eon-sovereign.workers.dev/missions/new?task=RESEARCH-DIGEST-$(date -u +%FT%TZ)&skill=e2e" -H "x-owner-token: $BOX_TOKEN")
           echo "diag: $(echo "$MID_RAW" | tail -c 120)"
-          MID=$(echo "$MID_RAW" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))")
+          MID=$(echo "$MID_RAW" | head -n 1 | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))")
           [ -z "$MID" ] && exit 1
           curl -s -m 12 -X POST "https://eon-ai-chat.eon-sovereign.workers.dev/missions/accept?id=$MID&agent=e2e-limb" >/dev/null
           PSHA=$(printf '%s' "$P" | sha256sum | cut -d' ' -f1)
