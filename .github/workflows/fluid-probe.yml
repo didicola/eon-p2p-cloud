@@ -1,0 +1,12 @@
+name: fluid-probe
+# Measures GH-runner egress diversity (pre-registered test for fluid claims).
+on:
+  workflow_dispatch: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: |
+          echo "egress: $(curl -s -m 15 https://api.ipify.org || echo FAIL)"
+          echo "region: ${{ runner.region }} ${{ runner.os }} ${{ runner.arch }}"
