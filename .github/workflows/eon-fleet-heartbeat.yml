@@ -1,0 +1,59 @@
+name: eon-fleet-heartbeat
+# Cloud mirror of local eon-fleet-heartbeat + matrix-auto-renew (cloud-checkable subset).
+# Runs with ALL locals off. Alerts via the worker's own stored TG secret.
+# Local-only duties (service restarts, token files, redeploy with bundles)
+# remain on the Ubuntu/twin timers; everything reachable over HTTPS is here.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe fleet roots
+        id: roots
+        run: |
+          fail=0
+          for u in \
+            "https://eon-edge-brain.eon-sovereign.workers.dev/" \
+            "https://eon-learn-all.eon-sovereign.workers.dev/" \
+            "https://eon-mcp.eon-sovereign.workers.dev/" \
+            "https://eon-p2p-cloud.eon-sovereign.workers.dev/" \
+            "https://eon-distro.eon-sovereign.workers.dev/" \
+            "https://sage.eon-sovereign.workers.dev/" \
+            "https://mind.eon-sovereign.workers.dev/" \
+            "https://eon-vram.eon-sovereign.workers.dev/" \
+            "https://eon-matrix-keeper.eon-sovereign.workers.dev/" \
+            "https://ghost.eon-sovereign.workers.dev/" \
+            "https://eon-auto-deployer.eon-sovereign.workers.dev/" ; do
+            code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$u" || echo 000)
+            echo "$u -> $code"
+            [ "$code" = 200 ] || [ "$code" = 401 ] || fail=1
+          done
+          [ "$fail" = 0 ] && echo ROOTS_OK || { echo ROOTS_FAIL; exit 1; }
+      - name: probe thinking paths
+        id: think
+        run: |
+          fail=0
+          code=$(curl -s -m 25 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"q":"ping"}' https://sage.eon-sovereign.workers.dev/think || echo 000)
+          echo "sage/think -> $code"; [ "$code" = 200 ] || fail=1
+          code=$(curl -s -m 25 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"q":"ping"}' https://eon-edge-brain.eon-sovereign.workers.dev/think || echo 000)
+          echo "brain/think -> $code"; [ "$code" = 200 ] || fail=1
+          [ "$fail" = 0 ] && echo THINK_OK || { echo THINK_FAIL; exit 1; }
+      - name: probe keeper + vram state
+        id: state
+        run: |
+          fail=0
+          hunter=$(curl -s -m 15 https://eon-matrix-keeper.eon-sovereign.workers.dev/status | python3 -c 'import json,sys;print(json.load(sys.stdin).get("hunter",False))' 2>/dev/null)
+          echo "keeper.hunter -> $hunter"; [ "$hunter" = "True" ] || fail=1
+          vram=$(curl -s -m 15 "https://eon-vram.eon-sovereign.workers.dev/read?addr=0xa0008000" | python3 -c 'import json,sys;print(len(json.load(sys.stdin).get("data","")))' 2>/dev/null)
+          echo "vram bytes -> $vram"; [ "${vram:-0}" -gt 100 ] || fail=1
+          [ "$fail" = 0 ] && echo STATE_OK || { echo STATE_FAIL; exit 1; }
+      - name: alert on failure
+        if: failure()
+        run: |
+          curl -s -m 20 -X POST -H 'Content-Type: application/json' \
+            -d '{"text":"GH heartbeat: CLOUD fleet check FAILED (see run logs). Locals may be off — cloud saw it first."}' \
+            https://eon-p2p-cloud.eon-sovereign.workers.dev/tg/send | head -c 200
+          echo; echo ALERT_SENT
