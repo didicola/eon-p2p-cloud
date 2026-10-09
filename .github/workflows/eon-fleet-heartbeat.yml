@@ -19,6 +19,7 @@ jobs:
             "https://eon-edge-brain.eon-sovereign.workers.dev/" \
             "https://eon-learn-all.eon-sovereign.workers.dev/" \
             "https://eon-mcp.eon-sovereign.workers.dev/" \
+            "https://distros.eon-sovereign.workers.dev/" \
             "https://eon-p2p-cloud.eon-sovereign.workers.dev/" \
             "https://sage.eon-sovereign.workers.dev/" \
             "https://mind.eon-sovereign.workers.dev/" \
