@@ -720,6 +720,25 @@ export default {
         }
 
         // --- Tier 5: Enqueue to swarm (fallback) ---
+        // Fail closed: never enqueue into a swarm with zero live peers (tasks would be dropped silently).
+        const swarmPeerCounts = await Promise.all(
+          SWARM_SHARDS.map(async (shard) => {
+            try {
+              const stub = getSwarmDO(env, shard);
+              return await stub.getPeerCount().catch(() => 0);
+            } catch {
+              return 0;
+            }
+          }),
+        );
+        const totalSwarmPeers = swarmPeerCounts.reduce((s, n) => s + n, 0);
+        if (!(totalSwarmPeers > 0)) {
+          return jsonError(
+            503,
+            "no_peers",
+            "No P2P peers available; task not queued. Retry when totalPeers > 0 or use the local gateway.",
+          );
+        }
         const promptText = body.messages.map((m) => m.content).join("\n");
         const swarmStub = getSwarmDO(env, modelName);
         const taskId = await swarmStub.enqueueTask(
@@ -1020,8 +1039,23 @@ export default {
           latencyMs?: number;
         };
 
-        const stub = getSwarmDO(env, "general");
-        await stub.submitResult(taskId, body.result);
+        let submitted = false;
+        for (const shard of SWARM_SHARDS) {
+          try {
+            const stub = getSwarmDO(env, shard);
+            const existing = await stub.getTaskResult(taskId);
+            if (existing) {
+              await stub.submitResult(taskId, body.result);
+              submitted = true;
+              break;
+            }
+          } catch {
+            // try the next shard
+          }
+        }
+        if (!submitted) {
+          return jsonError(404, "task_not_found", `Task "${taskId}" not found in any shard`);
+        }
 
         // Record reputation if peerId provided
         if (body.peerId && env.REPUTATION) {
@@ -1081,17 +1115,59 @@ export default {
         url.pathname.split("/").length === 4
       ) {
         const taskId = url.pathname.split("/").pop()!;
-        const stub = getSwarmDO(env, "general");
-        const task = await stub.getTaskResult(taskId);
-
-        if (!task) {
-          return jsonError(404, "task_not_found", `Task "${taskId}" not found`);
+        let found: { shard: string; task: any } | null = null;
+        for (const shard of SWARM_SHARDS) {
+          try {
+            const stub = getSwarmDO(env, shard);
+            const task = await stub.getTaskResult(taskId);
+            if (task) {
+              found = { shard, task };
+              break;
+            }
+          } catch {
+            // try the next shard
+          }
         }
 
-        return new Response(JSON.stringify(task), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-        });
+        if (!found) {
+          return jsonError(
+            410,
+            "task_expired",
+            `Task "${taskId}" is no longer tracked; treat as terminal and do not retry.`,
+          );
+        }
+
+        const task = found.task;
+        const TASK_TTL_MS = 10 * 60 * 1000;
+        if (!task.done && Date.now() - (task.created || 0) > TASK_TTL_MS) {
+          return new Response(
+            JSON.stringify({
+              task_id: taskId,
+              status: "expired",
+              shard: found.shard,
+              model: task.model,
+              created: task.created,
+              message: "Task expired before completion; treat as terminal.",
+            }),
+            {
+              status: 410,
+              headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+            },
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            ...task,
+            task_id: taskId,
+            status: task.done ? "completed" : "queued",
+            shard: found.shard,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          },
+        );
       }
 
       // ─────────────────────────────────────────────────────────────
