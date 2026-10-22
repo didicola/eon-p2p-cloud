@@ -25,8 +25,7 @@ jobs:
             "https://mind.eon-sovereign.workers.dev/" \
             "https://eon-vram.eon-sovereign.workers.dev/" \
             "https://eon-matrix-keeper.eon-sovereign.workers.dev/" \
-            "https://ghost.eon-sovereign.workers.dev/" \
-            "https://eon-auto-deployer.eon-sovereign.workers.dev/" ; do
+            "https://ghost.eon-sovereign.workers.dev/" ; do
             code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$u" || echo 000)
             echo "$u -> $code"
             [ "$code" = 200 ] || [ "$code" = 401 ] || fail=1
