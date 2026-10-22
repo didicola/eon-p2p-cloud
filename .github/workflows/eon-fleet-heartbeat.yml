@@ -46,7 +46,7 @@ jobs:
           fail=0
           hunter=$(curl -s -m 15 https://eon-matrix-keeper.eon-sovereign.workers.dev/status | python3 -c 'import json,sys;print(json.load(sys.stdin).get("hunter",False))' 2>/dev/null)
           echo "keeper.hunter -> $hunter"; [ "$hunter" = "True" ] || fail=1
-          vram=$(curl -s -m 15 "https://eon-vram.eon-sovereign.workers.dev/read?addr=0xa0008000" | python3 -c 'import json,sys;print(len(json.load(sys.stdin).get("data","")))' 2>/dev/null)
+          vram=$(curl -s -m 15 "https://eon-vram.eon-sovereign.workers.dev/read?addr=0xa0007000" | python3 -c 'import json,sys;print(len(json.load(sys.stdin).get("data","")))' 2>/dev/null)
           echo "vram bytes -> $vram"; [ "${vram:-0}" -gt 100 ] || fail=1
           [ "$fail" = 0 ] && echo STATE_OK || { echo STATE_FAIL; exit 1; }
       - name: alert on failure
